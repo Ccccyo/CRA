@@ -1,0 +1,23 @@
+entity_id,name,country,state,city,address,postcode,trade_style,paydex,failure_score,rating
+900000101,Harbor Polymer Trading LLC,US,MI,Midland,120 Ashman St,48640,,78,72,3A2
+900000102,Harbor Polymer Trading West LLC,US,MI,Detroit,55 Woodward Ave,48226,,70,61,3A3
+900000103,Harbor Polymer Holdings Inc,US,MI,Ann Arbor,900 State St,48104,,80,80,4A1
+900000104,Harbor Polymer Trading Inc,US,TX,Houston,2100 Main St,77002,,65,48,2A3
+900000201,Corvel Printing Company,US,OH,Dayton,14 Monument Ave,45402,Corvel Print,72,66,3A2
+900000202,Corvel Productions SARL,FR,,Le Conquet,13 Route de la Presqu'ile,29217,,,55,
+900000203,Corvel Gestion Privee,FR,,Longuyon,3 Avenue O Corvel,54260,,,58,
+900000301,Northstar International Chemicals Inc,US,NJ,Newark,1 Gateway Ctr,07102,Northstar Intl Chem,82,85,5A1
+900000302,Northstar Chemicals Ltd,GB,,Manchester,40 Deansgate,M3 2BY,,,74,
+900000401,Islas Caribe Distribuidora Inc,US,PR,San Juan,250 Ave Ponce de Leon,00918,,68,60,2A2
+900000402,Caribe Supply Co,US,VI,Charlotte Amalie,8 Main St,00802,,60,50,1A3
+900000501,Mayotte Plastiques SAS,FR,,Mamoudzou,Rue du Commerce,97600,,,52,
+900000601,Quimica del Pacifico SA de CV,MX,,Guadalajara,Av Vallarta 3000,44690,QDP,,70,
+900000602,Quimica Pacifico Industrial SA,CL,,Santiago,Av Apoquindo 4500,7550000,,,65,
+900000701,浙江华澜新材料有限公司,CN,,杭州,滨江区江南大道1000号,310051,Hualan New Materials,,76,
+900000702,华澜贸易（上海）有限公司,CN,,上海,浦东新区世纪大道88号,200120,Hualan Trading,,63,
+900000801,Taiwan Delta Resin Co Ltd,CN,,Taipei,No 100 Sec 3 Nanjing E Rd,104,Delta Resin,,71,
+900000901,Andes Agro Insumos SA,AR,,Buenos Aires,Av Corrientes 1234,C1043,,,45,
+900001001,Rhein Coatings GmbH,DE,,Cologne,Hohe Strasse 10,50667,,,79,
+900001002,Rheinland Coating Systems AG,DE,,Dusseldorf,Konigsallee 20,40212,,,81,
+900001101,Maple Leaf Pigments Inc,CA,ON,Toronto,100 King St W,M5X 1A9,,74,70,3A1
+900001102,Maple Leaf Pigments Inc,CA,QC,Montreal,1000 Rue Sherbrooke,H3A 3G4,,69,58,2A2

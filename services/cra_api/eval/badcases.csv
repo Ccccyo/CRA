@@ -1,0 +1,4 @@
+﻿case_id,module,eval_id,round,input,expected,actual,stage,category,severity,fix,status
+BC-0001,entity,EN-003,R0,"Corvel Printing Co., Inc / YT ",无可信匹配,900000202 Corvel Productions SARL（72.7）,排序/阈值,硬选,P0,R1：NO_MATCH_SCORE 70→80（只改一处）；已加入回归集 REG-EN-001,fixed
+BC-0002,draft,CASE-002,R1,CASE-002 写意见（deepseek-reasoner 实测）,4 项定性评分都给出建议,只返回 pay_habits 1 项，另 3 项缺失；界面误报为「不在档位里的选项 None」,生成/输出格式,漏项,P1,根因：提示词的 JSON 示例只写了 pay_habits，模型照抄结构。修复：示例列全 4 项 + Schema 设为必填（缺项自动重试）+ 界面区分缺失/非法；回归测试 test_draft_retries_when_qualitative_items_missing,fixed
+BC-0003,draft,CASE-003,R2,CASE-003 写意见（deepseek-reasoner 实测，页面走查）,出处校验通过（内容每句都有引用）,误报：模型把 [S#] 写在句号后面，被算到下一句 → 首句「缺出处」、15/17/70 等数字「无出处」,校验,校验器误报,P1,check_answer 先把「。[S#]」归到前一句（normalize_citations）；用实测输出复核通过；回归测试 test_citation_after_full_stop_belongs_to_previous_sentence,fixed

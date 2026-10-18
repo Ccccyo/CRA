@@ -1,0 +1,30 @@
+{
+  "case_id": "CASE-004",
+  "title": "Northstar International Chemicals 年度复审",
+  "bp": "1000201",
+  "credit_segment": "0001",
+  "requested_cl_usd": 3000000.0,
+  "statement_currency": "USD",
+  "customer": {
+    "name": "Northstar International Chemicals",
+    "country": "US",
+    "state": "NJ",
+    "city": "Newark"
+  },
+  "expected_entity_id": "",
+  "business": "特种化学品生产商，纽约证券交易所上市",
+  "new_year": {
+    "period_end": "2025-12-31",
+    "pdf": "（待上传）",
+    "scan": false
+  },
+  "inputs": {
+    "pay_habits_from_ar": "Prompt",
+    "pay_habits_detail": "近 12 个月全部按期付款",
+    "customer_distinction_from_sales": "Strategic",
+    "company_type_hint": "上市公司，年报经审计",
+    "sovereign_hint": "（助手查 OECD 国家风险）"
+  },
+  "mock": true,
+  "package": "data/handoff/imported/1000201_20261019-025003.xlsx"
+}

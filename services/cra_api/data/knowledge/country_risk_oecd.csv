@@ -1,0 +1,202 @@
+iso3,country,previous,current,notes,cra_sovereign_choice
+AFG,Afghanistan,7,7,,grade C or Not rated
+ALB,Albania,4,4,,grade B
+DZA,Algeria,5,5,,grade C or Not rated
+AND,Andorra,-,-,(8),grade C or Not rated
+AGO,Angola,6,6,,grade C or Not rated
+ATG,Antigua and Barbuda,7,7,,grade C or Not rated
+ARG,Argentina,7,7,,grade C or Not rated
+ARM,Armenia,5,5,,grade C or Not rated
+ABW,Aruba,4,4,,grade B
+AUS,Australia,-,-,(6),grade A or above
+AUT,Austria,-,-,(6) (7),grade A or above
+AZE,Azerbaijan,4,4,,grade B
+BHS,Bahamas,4,4,,grade B
+BHR,Bahrain,6,6,,grade C or Not rated
+BGD,Bangladesh,6,6,,grade C or Not rated
+BRB,Barbados,-,-,(5),grade C or Not rated
+BLR,Belarus,7,7,,grade C or Not rated
+BEL,Belgium,-,-,(6) (7),grade A or above
+BLZ,Belize,-,-,(5),grade C or Not rated
+BEN,Benin,6,6,,grade C or Not rated
+BTN,Bhutan,6,6,,grade C or Not rated
+BOL,Bolivia,7,7,,grade C or Not rated
+BIH,Bosnia and Herzegovina,6,6,,grade C or Not rated
+BWA,Botswana,3,3,,grade B
+BRA,Brazil,4,4,,grade B
+BRN,Brunei Darussalam,-,-,(5),grade C or Not rated
+BGR,Bulgaria,2,2,,grade A or above
+BFA,Burkina Faso,7,7,,grade C or Not rated
+BDI,Burundi,7,7,,grade C or Not rated
+CPV,Cabo Verde,5,5,,grade C or Not rated
+KHM,Cambodia,6,6,,grade C or Not rated
+CMR,Cameroon,6,6,,grade C or Not rated
+CAN,Canada,-,-,(6),grade A or above
+CAF,Central African Republic,7,7,,grade C or Not rated
+TCD,Chad,7,7,,grade C or Not rated
+CHL,Chile,-,-,(6),grade A or above
+CHN,China (People’s Republic of),2,2,,grade A or above
+COL,Colombia,4,4,,grade B
+COM,Comoros,-,-,(5),grade C or Not rated
+COG,Congo,7,7,,grade C or Not rated
+CRI,Costa Rica,3,3,,grade B
+CIV,Côte d’Ivoire,5,5,,grade C or Not rated
+HRV,Croatia,-,-,(7),grade A or above
+CUB,Cuba,7,7,,grade C or Not rated
+CUW,Curaçao,5,5,,grade C or Not rated
+CYP,Cyprus,-,-,(2) (7),grade A or above
+CZE,Czechia,-,-,(6),grade A or above
+PRK,Democratic People's Republic of Korea,7,7,,grade C or Not rated
+COD,Democratic Republic of the Congo,7,7,,grade C or Not rated
+DNK,Denmark,-,-,(6),grade A or above
+DJI,Djibouti,7,7,,grade C or Not rated
+DMA,Dominica,-,-,(5),grade C or Not rated
+DOM,Dominican Republic,4,4,,grade B
+ECU,Ecuador,6,6,,grade C or Not rated
+EGY,Egypt,6,6,,grade C or Not rated
+SLV,El Salvador,6,6,,grade C or Not rated
+GNQ,Equatorial Guinea,7,7,,grade C or Not rated
+ERI,Eritrea,7,7,,grade C or Not rated
+EST,Estonia,-,-,(6) (7),grade A or above
+SWZ,Eswatini,6,6,,grade C or Not rated
+ETH,Ethiopia,7,7,,grade C or Not rated
+FJI,Fiji,5,5,,grade C or Not rated
+FIN,Finland,-,-,(6) (7),grade A or above
+FRA,France,-,-,(6) (7),grade A or above
+GAB,Gabon,7,7,,grade C or Not rated
+GMB,Gambia,7,7,,grade C or Not rated
+GEO,Georgia,5,5,,grade C or Not rated
+DEU,Germany,-,-,(6) (7),grade A or above
+GHA,Ghana,7,7,,grade C or Not rated
+GRC,Greece,-,-,(6) (7),grade A or above
+GRD,Grenada,-,-,(5),grade C or Not rated
+GTM,Guatemala,4,4,,grade B
+GIN,Guinea,7,7,,grade C or Not rated
+GNB,Guinea-Bissau,7,7,,grade C or Not rated
+GUY,Guyana,5,5,,grade C or Not rated
+HTI,Haiti,7,7,,grade C or Not rated
+HND,Honduras,5,5,,grade C or Not rated
+HKG,Hong Kong (China),2,2,,grade A or above
+HUN,Hungary,-,-,(6),grade A or above
+ISL,Iceland,-,-,(6),grade A or above
+IND,India,3,3,,grade B
+IDN,Indonesia,3,3,,grade B
+IRN,Iran,7,7,,grade C or Not rated
+IRQ,Iraq,7,7,,grade C or Not rated
+IRL,Ireland,-,-,(6) (7),grade A or above
+ISR,Israel,-,-,(3) (6),grade A or above
+ITA,Italy,-,-,(6) (7),grade A or above
+JAM,Jamaica,5,5,,grade C or Not rated
+JPN,Japan,-,-,(6),grade A or above
+JOR,Jordan,5,5,,grade C or Not rated
+KAZ,Kazakhstan,5,5,,grade C or Not rated
+KEN,Kenya,7,7,,grade C or Not rated
+KIR,Kiribati,-,-,(5),grade C or Not rated
+KOR,Korea,-,-,(6),grade A or above
+XKV,Kosovo,6,6,(4),grade C or Not rated
+KWT,Kuwait,2,2,,grade A or above
+KGZ,Kyrgyzstan,7,7,,grade C or Not rated
+LAO,Lao People’s Democratic Republic,7,7,,grade C or Not rated
+LVA,Latvia,-,-,(6) (7),grade A or above
+LBN,Lebanon,7,7,,grade C or Not rated
+LSO,Lesotho,6,6,,grade C or Not rated
+LBR,Liberia,7,7,,grade C or Not rated
+LBY,Libya,7,7,,grade C or Not rated
+LIE,Liechtenstein,-,-,(5),grade C or Not rated
+LTU,Lithuania,-,-,(6) (7),grade A or above
+LUX,Luxembourg,-,-,(6) (7),grade A or above
+MAC,Macau (China),-,-,(5),grade C or Not rated
+MDG,Madagascar,7,7,,grade C or Not rated
+MWI,Malawi,7,7,,grade C or Not rated
+MYS,Malaysia,2,2,,grade A or above
+MDV,Maldives,7,7,,grade C or Not rated
+MLI,Mali,7,7,,grade C or Not rated
+MLT,Malta,-,-,(7),grade A or above
+MHL,Marshall Islands,-,-,(5),grade C or Not rated
+MRT,Mauritania,6,6,,grade C or Not rated
+MUS,Mauritius,3,3,,grade B
+MEX,Mexico,3,3,,grade B
+FSM,Micronesia,-,-,(5),grade C or Not rated
+MDA,Moldova,6,6,,grade C or Not rated
+MCO,Monaco,-,-,(8),grade C or Not rated
+MNG,Mongolia,6,6,,grade C or Not rated
+MNE,Montenegro,6,6,,grade C or Not rated
+MAR,Morocco,3,3,,grade B
+MOZ,Mozambique,7,7,,grade C or Not rated
+MMR,Myanmar,7,7,,grade C or Not rated
+NAM,Namibia,6,5,,grade C or Not rated
+NRU,Nauru,-,-,(5),grade C or Not rated
+NPL,Nepal,6,6,,grade C or Not rated
+NLD,Netherlands,-,-,(6) (7),grade A or above
+NZL,New Zealand,-,-,(6),grade A or above
+NIC,Nicaragua,7,7,,grade C or Not rated
+NER,Niger,7,7,,grade C or Not rated
+NGA,Nigeria,6,6,,grade C or Not rated
+MKD,Northern Macedonia,5,5,,grade C or Not rated
+NOR,Norway,-,-,(6),grade A or above
+OMN,Oman,3,3,,grade B
+PAK,Pakistan,7,7,,grade C or Not rated
+PLW,Palau,-,-,(5),grade C or Not rated
+PAN,Panama,4,4,,grade B
+PNG,Papua New Guinea,6,6,,grade C or Not rated
+PRY,Paraguay,4,4,,grade B
+PER,Peru,3,3,,grade B
+PHL,Philippines,3,3,,grade B
+POL,Poland,-,-,(6),grade A or above
+PRT,Portugal,-,-,(6) (7),grade A or above
+QAT,Qatar,2,2,,grade A or above
+ROU,Romania,3,3,,grade B
+RUS,Russia,7,7,,grade C or Not rated
+RWA,Rwanda,6,6,,grade C or Not rated
+KNA,Saint Kitts and Nevis,-,-,(5),grade C or Not rated
+LCA,Saint Lucia,-,-,(5),grade C or Not rated
+VCT,Saint Vincent and the Grenadines,-,-,(5),grade C or Not rated
+WSM,Samoa,-,-,(5),grade C or Not rated
+SMR,San Marino,-,-,(8),grade C or Not rated
+STP,Sao Tome and Principe,-,-,(5),grade C or Not rated
+SAU,Saudi Arabia,2,2,,grade A or above
+SEN,Senegal,7,7,,grade C or Not rated
+SRB,Serbia,4,4,,grade B
+SYC,Seychelles,-,-,(5),grade C or Not rated
+SLE,Sierra Leone,7,7,,grade C or Not rated
+SGP,Singapore,0,0,,grade A or above
+SXM,Sint Maarten,-,-,(5),grade C or Not rated
+SVK,Slovak Republic,-,-,(6) (7),grade A or above
+SVN,Slovenia,-,-,(6) (7),grade A or above
+SLB,Solomon Islands,-,-,(5),grade C or Not rated
+SOM,Somalia,7,7,,grade C or Not rated
+ZAF,South Africa,4,4,,grade B
+SSD,South Sudan,7,7,,grade C or Not rated
+ESP,Spain,-,-,(6) (7),grade A or above
+LKA,Sri Lanka,7,7,,grade C or Not rated
+SDN,Sudan,7,7,,grade C or Not rated
+SUR,Suriname,7,7,,grade C or Not rated
+SWE,Sweden,-,-,(6),grade A or above
+CHE,Switzerland,-,-,(6),grade A or above
+SYR,Syrian Arab Republic,7,7,,grade C or Not rated
+TWN,Chinese Taipei,2,2,,grade A or above
+TJK,Tajikistan,7,7,,grade C or Not rated
+TZA,Tanzania,6,6,,grade C or Not rated
+THA,Thailand,3,3,,grade B
+TLS,Timor-Leste,6,6,,grade C or Not rated
+TGO,Togo,6,6,,grade C or Not rated
+TON,Tonga,-,-,(5),grade C or Not rated
+TTO,Trinidad and Tobago,3,3,,grade B
+TUN,Tunisia,7,7,,grade C or Not rated
+TUR,Türkiye,5,5,,grade C or Not rated
+TKM,Turkmenistan,7,7,,grade C or Not rated
+TUV,Tuvalu,-,-,(5),grade C or Not rated
+UGA,Uganda,6,6,,grade C or Not rated
+UKR,Ukraine,7,7,,grade C or Not rated
+ARE,United Arab Emirates,2,2,,grade A or above
+GBR,United Kingdom,-,-,(6),grade A or above
+USA,United States,-,-,(6),grade A or above
+URY,Uruguay,3,3,,grade B
+UZB,Uzbekistan,5,5,,grade C or Not rated
+VUT,Vanuatu,-,-,(5),grade C or Not rated
+VEN,Venezuela,7,7,,grade C or Not rated
+VNM,Viet Nam,4,3,,grade B
+PSE,West Bank and Gaza,7,7,,grade C or Not rated
+YEM,Yemen,7,7,,grade C or Not rated
+ZMB,Zambia,7,7,,grade C or Not rated
+ZWE,Zimbabwe,7,7,,grade C or Not rated

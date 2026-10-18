@@ -1,0 +1,20 @@
+{
+  "case_id": "CASE-002",
+  "title": "华澜新材料 额度提升",
+  "mock": true,
+  "bp": "1000701",
+  "credit_segment": "0001",
+  "requested_cl_usd": 2000000,
+  "statement_currency": "CNY",
+  "customer": {"name": "华澜新材料", "country": "CN", "state": "", "city": "杭州"},
+  "expected_entity_id": "900000701",
+  "business": "改性塑料和工程材料生产商",
+  "new_year": {"period_end": "2025-12-31", "pdf": "hualan_2025_annual_report.pdf", "scan": false},
+  "inputs": {
+    "pay_habits_from_ar": "1 to 15 days arrear",
+    "pay_habits_detail": "近 12 个月平均逾期 9 天",
+    "customer_distinction_from_sales": "Priority - Above Average Margin",
+    "company_type_hint": "非上市，财报经审计",
+    "sovereign_hint": "中国，主权评级 A+"
+  }
+}

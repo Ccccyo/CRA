@@ -1,0 +1,30 @@
+{
+  "case_id": "CASE-001",
+  "title": "Harbor Polymer 新客户授信",
+  "bp": "1000101",
+  "credit_segment": "0001",
+  "requested_cl_usd": 500000.0,
+  "statement_currency": "USD",
+  "customer": {
+    "name": "Harbor Polymer Trading",
+    "country": "US",
+    "state": "MI",
+    "city": "Midland"
+  },
+  "expected_entity_id": "900000101",
+  "business": "聚合物树脂分销商，主要客户为汽车零部件厂",
+  "new_year": {
+    "period_end": "2025-12-31",
+    "pdf": "harbor_polymer_fy2025.pdf",
+    "scan": false
+  },
+  "inputs": {
+    "pay_habits_from_ar": "Prompt",
+    "pay_habits_detail": "近 12 个月平均逾期 3 天以内",
+    "customer_distinction_from_sales": "Strategic",
+    "company_type_hint": "私营公司，财报经会计师事务所审计",
+    "sovereign_hint": "美国，主权评级 AA+"
+  },
+  "mock": true,
+  "package": "data/handoff/imported/1000101_20261003-213445.xlsx"
+}

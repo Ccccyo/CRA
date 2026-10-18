@@ -1,0 +1,21 @@
+country,iso_alpha2,substitute_country,substitute_alpha2
+Aland Islands,AX,Finland,FI
+Cocos (Keeling) Islands,CC,Australia,AU
+New Caledonia,NC,France,FR
+Guernsey,GG,United Kingdom,GB
+Isle of Man,IM,United Kingdom,GB
+Jersey,JE,United Kingdom,GB
+Mayotte,YT,France,FR
+Niue,NU,New Zealand,NZ
+Palau,PW,Federated States Of Micronesia,FM
+"Palestine, State of",PS,Israel,IL
+Puerto Rico,PR,United States,US
+Saint Barthelemy,BL,France,FR
+St Martin,MF,France,FR
+St Pierre Et Miquelon,PM,France,FR
+Svalbard and Jan Mayen,SJ,Norway,NO
+United States Minor Outlying Islands,UM,United States,US
+Vatican City,VA,Italy,IT
+United States Virgin Islands,VI,United States,US
+Wallis and Futuna Islands,WF,France,FR
+Western Sahara,EH,Morocco,MA

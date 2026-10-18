@@ -1,0 +1,243 @@
+{
+  "note": "MOCK：模拟报表页 + 预先录制的模型输出，用于没有 API key 时演示；校验逻辑真实运行。",
+  "pages": [
+    {
+      "number": 3,
+      "text": "ESTADO DE SITUACION FINANCIERA (OCR)\nMiles de pesos mexicanos\n                         2025      2024\nEfectivo  52,000  60,000\nCuentas por cobrar  286,000  270,000\nInventarios  241,000  228,000\nActivo circulante  610,000  590,000\nIntangibles  45,000  46,000\nActivo total  1,320,000  1,280,000\nDeuda a corto plazo  190,000  170,000\nProveedores  215,000  205,000\nPasivo circulante  498,000  470,000\nDeuda a largo plazo  362,000  370,000\nPasivo total  905,000  870,000\nCapital contable  415,000  410,000"
+    },
+    {
+      "number": 4,
+      "text": "ESTADO DE RESULTADOS (OCR)\nMiles de pesos mexicanos\n                         2025      2024\nVentas netas  1,240,000  1,180,000\nCosto de ventas  980,000  925,000\nUtilidad de operacion  74,000  81,000\nGastos por intereses  38,000  35,000\nUtilidad neta  29,000  36,000"
+    },
+    {
+      "number": 5,
+      "text": "ESTADO DE FLUJOS DE EFECTIVO (OCR)\nMiles de pesos mexicanos\n                         2025      2024\nDepreciacion y amortizacion  ### ilegible ###\nFlujos netos de efectivo de actividades de operacion  41,000  52,000\nAdquisicion de propiedades, planta y equipo  (58,000)  (55,000)"
+    }
+  ],
+  "llm_output": {
+    "company": "Quimica del Pacifico SA de CV",
+    "statement_scope": "unknown",
+    "values": [
+      {
+        "field": "cash",
+        "period_end": "2025-12-31",
+        "value": 52000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 3,
+        "source_text": "Efectivo  52,000  60,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "accounts_receivable",
+        "period_end": "2025-12-31",
+        "value": 286000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 3,
+        "source_text": "Cuentas por cobrar  286,000  270,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "inventories",
+        "period_end": "2025-12-31",
+        "value": 214000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 3,
+        "source_text": "Inventarios 214,000 228,000",
+        "confidence": "low",
+        "note": null
+      },
+      {
+        "field": "total_current_assets",
+        "period_end": "2025-12-31",
+        "value": 610000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 3,
+        "source_text": "Activo circulante  610,000  590,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "intangible_assets",
+        "period_end": "2025-12-31",
+        "value": 45000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 3,
+        "source_text": "Intangibles  45,000  46,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_assets",
+        "period_end": "2025-12-31",
+        "value": 1320000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 3,
+        "source_text": "Activo total  1,320,000  1,280,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "short_term_debt",
+        "period_end": "2025-12-31",
+        "value": 190000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 3,
+        "source_text": "Deuda a corto plazo  190,000  170,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "accounts_payable",
+        "period_end": "2025-12-31",
+        "value": 215000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 3,
+        "source_text": "Proveedores  215,000  205,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_current_liabilities",
+        "period_end": "2025-12-31",
+        "value": 498000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 3,
+        "source_text": "Pasivo circulante  498,000  470,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "long_term_debt",
+        "period_end": "2025-12-31",
+        "value": 362000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 3,
+        "source_text": "Deuda a largo plazo  362,000  370,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_liabilities",
+        "period_end": "2025-12-31",
+        "value": 905000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 3,
+        "source_text": "Pasivo total  905,000  870,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_equity",
+        "period_end": "2025-12-31",
+        "value": 415000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 3,
+        "source_text": "Capital contable  415,000  410,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "net_sales",
+        "period_end": "2025-12-31",
+        "value": 1240000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 4,
+        "source_text": "Ventas netas  1,240,000  1,180,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "cost_of_goods_sold",
+        "period_end": "2025-12-31",
+        "value": 980000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 4,
+        "source_text": "Costo de ventas  980,000  925,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "operating_income",
+        "period_end": "2025-12-31",
+        "value": 74000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 4,
+        "source_text": "Utilidad de operacion  74,000  81,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "interest_expense",
+        "period_end": "2025-12-31",
+        "value": 38000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 4,
+        "source_text": "Gastos por intereses  38,000  35,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "net_income",
+        "period_end": "2025-12-31",
+        "value": 29000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 4,
+        "source_text": "Utilidad neta  29,000  36,000",
+        "confidence": "low",
+        "note": "扫描件该行较模糊"
+      },
+      {
+        "field": "operating_cash_flow",
+        "period_end": "2025-12-31",
+        "value": 41000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 5,
+        "source_text": "Flujos netos de efectivo de actividades de operacion  41,000  52,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "capex",
+        "period_end": "2025-12-31",
+        "value": 58000,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 5,
+        "source_text": "Adquisicion de propiedades, planta y equipo  (58,000)  (55,000)",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "depreciation_amortization",
+        "period_end": "2025-12-31",
+        "value": null,
+        "unit_multiplier": 1000,
+        "currency": "MXN",
+        "page": 5,
+        "source_text": null,
+        "confidence": "low",
+        "note": "扫描页该行无法辨认"
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "note": "MOCK：预先录制的模型输出（合格示例），校验逻辑真实运行。",
+  "llm_output": {
+    "company_description": "Harbor Polymer Trading LLC 位于美国密歇根州 Midland，D&B（模拟）编号 900000101 [S2]。公司为聚合物树脂分销商，主要客户为汽车零部件厂 [S3]。",
+    "risk_comments": "近三年营业收入由 59,800,000 美元增长至 68,000,000 美元，规模稳步扩大 [S1]。营业利润率由 6.7% 提升至 7.5%，利息保障倍数由 5.8 提升至 8.2，盈利和偿债能力同步改善 [S1]。资产负债率由 61.1% 降至 58.6%，杠杆逐年下降 [S1]。D&B（模拟）Paydex 为 78，失败评分 72，评级 3A2 [S2]。付款习惯为 Prompt，近 12 个月平均逾期 3 天以内 [S3]。国家风险低，美国主权评级 AA+ [S3]。申请额度 500,000 美元，需与 CRA 建议额度比较后确定审批层级 [S3]。",
+    "qualitative": {
+      "pay_habits": {"choice": "Prompt", "reason": "SAP 应收显示近 12 个月平均逾期 3 天以内 [S3]"},
+      "company_type": {"choice": "Private - audited", "reason": "私营公司，财报经会计师事务所审计 [S3]"},
+      "sovereign_rating": {"choice": "grade A or above", "reason": "美国主权评级 AA+ [S3]"},
+      "customer_distinction": {"choice": "Strategic", "reason": "商务部门标注为 Strategic [S3]"}
+    }
+  }
+}

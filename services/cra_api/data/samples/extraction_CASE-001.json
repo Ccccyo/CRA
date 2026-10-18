@@ -1,0 +1,243 @@
+{
+  "note": "MOCK：模拟报表页 + 预先录制的模型输出，用于没有 API key 时演示；校验逻辑真实运行。",
+  "pages": [
+    {
+      "number": 41,
+      "text": "CONSOLIDATED BALANCE SHEETS\n(In thousands of U.S. dollars)\n                         December 31, 2025    2024\nCash and cash equivalents  2,900  2,500\nAccounts receivable, net  8,600  8,000\nInventories  6,100  5,700\nTotal current assets  18,500  16,900\nGoodwill and intangible assets  1,900  2,000\nTotal assets  42,000  39,500\nShort-term debt and current portion of long-term debt  2,300  2,500\nAccounts payable  6,400  6,000\nTotal current liabilities  11,200  10,800\nLong-term debt  9,800  10,200\nTotal liabilities  24,600  23,700\nTotal equity  17,400  15,800"
+    },
+    {
+      "number": 42,
+      "text": "CONSOLIDATED STATEMENTS OF INCOME\n(In thousands of U.S. dollars)\n                         Year ended December 31, 2025    2024\nNet sales  68,000  63,500\nCost of sales  52,400  49,100\nOperating income  5,100  4,600\nInterest expense  620  650\nNet income  3,300  2,900"
+    },
+    {
+      "number": 44,
+      "text": "CONSOLIDATED STATEMENTS OF CASH FLOWS\n(In thousands of U.S. dollars)\n                         2025    2024\nDepreciation and amortization  1,200  1,150\nNet cash provided by operating activities  3,650  3,200\nCapital expenditures  (1,700)  (1,500)"
+    }
+  ],
+  "llm_output": {
+    "company": "Harbor Polymer Trading LLC",
+    "statement_scope": "consolidated",
+    "values": [
+      {
+        "field": "cash",
+        "period_end": "2025-12-31",
+        "value": 2900,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 41,
+        "source_text": "Cash and cash equivalents  2,900  2,500",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "accounts_receivable",
+        "period_end": "2025-12-31",
+        "value": 8600,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 41,
+        "source_text": "Accounts receivable, net  8,600  8,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "inventories",
+        "period_end": "2025-12-31",
+        "value": 6100,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 41,
+        "source_text": "Inventories  6,100  5,700",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_current_assets",
+        "period_end": "2025-12-31",
+        "value": 18500,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 41,
+        "source_text": "Total current assets  18,500  16,900",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "intangible_assets",
+        "period_end": "2025-12-31",
+        "value": 1900,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 41,
+        "source_text": "Goodwill and intangible assets  1,900  2,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_assets",
+        "period_end": "2025-12-31",
+        "value": 42000,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 41,
+        "source_text": "Total assets  42,000  39,500",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "short_term_debt",
+        "period_end": "2025-12-31",
+        "value": 2300,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 41,
+        "source_text": "Short-term debt and current portion of long-term debt  2,300  2,500",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "accounts_payable",
+        "period_end": "2025-12-31",
+        "value": 6400,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 41,
+        "source_text": "Accounts payable  6,400  6,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_current_liabilities",
+        "period_end": "2025-12-31",
+        "value": 11200,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 41,
+        "source_text": "Total current liabilities  11,200  10,800",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "long_term_debt",
+        "period_end": "2025-12-31",
+        "value": 9800,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 41,
+        "source_text": "Long-term debt  9,800  10,200",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_liabilities",
+        "period_end": "2025-12-31",
+        "value": 24600,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 41,
+        "source_text": "Total liabilities  24,600  23,700",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_equity",
+        "period_end": "2025-12-31",
+        "value": 17400,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 41,
+        "source_text": "Total equity  17,400  15,800",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "net_sales",
+        "period_end": "2025-12-31",
+        "value": 68000,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 42,
+        "source_text": "Net sales  68,000  63,500",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "cost_of_goods_sold",
+        "period_end": "2025-12-31",
+        "value": 52400,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 42,
+        "source_text": "Cost of sales  52,400  49,100",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "operating_income",
+        "period_end": "2025-12-31",
+        "value": 5100,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 42,
+        "source_text": "Operating income  5,100  4,600",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "interest_expense",
+        "period_end": "2025-12-31",
+        "value": 620,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 42,
+        "source_text": "Interest expense  620  650",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "net_income",
+        "period_end": "2025-12-31",
+        "value": 3300,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 42,
+        "source_text": "Net income  3,300  2,900",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "depreciation_amortization",
+        "period_end": "2025-12-31",
+        "value": 1200,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 44,
+        "source_text": "Depreciation and amortization  1,200  1,150",
+        "confidence": "medium",
+        "note": "取自现金流量表"
+      },
+      {
+        "field": "operating_cash_flow",
+        "period_end": "2025-12-31",
+        "value": 3650,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 44,
+        "source_text": "Net cash provided by operating activities  3,650  3,200",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "capex",
+        "period_end": "2025-12-31",
+        "value": 1700,
+        "unit_multiplier": 1000,
+        "currency": "USD",
+        "page": 44,
+        "source_text": "Capital expenditures  (1,700)  (1,500)",
+        "confidence": "high",
+        "note": null
+      }
+    ]
+  }
+}

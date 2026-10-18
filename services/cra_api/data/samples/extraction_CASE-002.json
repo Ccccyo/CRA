@@ -1,0 +1,243 @@
+{
+  "note": "MOCK：模拟报表页 + 预先录制的模型输出，用于没有 API key 时演示；校验逻辑真实运行。",
+  "pages": [
+    {
+      "number": 88,
+      "text": "合并资产负债表\n2025年12月31日\n单位：千元  币种：人民币\n项目                期末余额      期初余额\n货币资金  210,000  185,000\n应收账款  395,000  360,000\n存货  268,000  250,000\n流动资产合计  960,000  880,000\n无形资产及商誉  88,000  90,000\n资产总计  2,150,000  2,010,000\n短期借款及一年内到期的非流动负债  240,000  260,000\n应付账款  310,000  290,000\n流动负债合计  720,000  690,000\n长期借款  380,000  400,000\n负债合计  1,180,000  1,130,000\n所有者权益合计  970,000  880,000"
+    },
+    {
+      "number": 90,
+      "text": "合并利润表\n2025年度\n单位：千元  币种：人民币\n项目                本期发生额    上期发生额\n营业总收入  1,860,000  1,720,000\n营业成本  1,520,000  1,410,000\n营业利润  128,000  112,000\n其中：利息费用  21,500  23,000\n净利润  96,400  82,000"
+    },
+    {
+      "number": 93,
+      "text": "合并现金流量表\n2025年度\n单位：千元  币种：人民币\n项目                本期发生额    上期发生额\n固定资产折旧、无形资产摊销  54,000  50,000\n经营活动产生的现金流量净额  142,000  120,000\n购建固定资产、无形资产和其他长期资产支付的现金  (165,000)  (150,000)"
+    }
+  ],
+  "llm_output": {
+    "company": "浙江华澜新材料有限公司",
+    "statement_scope": "consolidated",
+    "values": [
+      {
+        "field": "cash",
+        "period_end": "2025-12-31",
+        "value": 210000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 88,
+        "source_text": "货币资金  210,000  185,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "accounts_receivable",
+        "period_end": "2025-12-31",
+        "value": 395000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 88,
+        "source_text": "应收账款  395,000  360,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "inventories",
+        "period_end": "2025-12-31",
+        "value": 268000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 88,
+        "source_text": "存货  268,000  250,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_current_assets",
+        "period_end": "2025-12-31",
+        "value": 960000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 88,
+        "source_text": "流动资产合计  960,000  880,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "intangible_assets",
+        "period_end": "2025-12-31",
+        "value": 88000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 88,
+        "source_text": "无形资产及商誉  88,000  90,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_assets",
+        "period_end": "2025-12-31",
+        "value": 2150000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 88,
+        "source_text": "资产总计  2,150,000  2,010,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "short_term_debt",
+        "period_end": "2025-12-31",
+        "value": 240000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 88,
+        "source_text": "短期借款及一年内到期的非流动负债  240,000  260,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "accounts_payable",
+        "period_end": "2025-12-31",
+        "value": 310000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 88,
+        "source_text": "应付账款  310,000  290,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_current_liabilities",
+        "period_end": "2025-12-31",
+        "value": 720000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 88,
+        "source_text": "流动负债合计  720,000  690,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "long_term_debt",
+        "period_end": "2025-12-31",
+        "value": 380000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 88,
+        "source_text": "长期借款  380,000  400,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_liabilities",
+        "period_end": "2025-12-31",
+        "value": 1180000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 88,
+        "source_text": "负债合计  1,180,000  1,130,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "total_equity",
+        "period_end": "2025-12-31",
+        "value": 970000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 88,
+        "source_text": "所有者权益合计  970,000  880,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "net_sales",
+        "period_end": "2025-12-31",
+        "value": 1860000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 90,
+        "source_text": "营业总收入  1,860,000  1,720,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "cost_of_goods_sold",
+        "period_end": "2025-12-31",
+        "value": 1520000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 90,
+        "source_text": "营业成本  1,520,000  1,410,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "operating_income",
+        "period_end": "2025-12-31",
+        "value": 128000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 90,
+        "source_text": "营业利润  128,000  112,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "interest_expense",
+        "period_end": "2025-12-31",
+        "value": 21500,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 90,
+        "source_text": "其中：利息费用  21,500  23,000",
+        "confidence": "medium",
+        "note": "取自财务费用明细中的利息支出"
+      },
+      {
+        "field": "net_income",
+        "period_end": "2025-12-31",
+        "value": 96400,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 90,
+        "source_text": "净利润  96,400  82,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "depreciation_amortization",
+        "period_end": "2025-12-31",
+        "value": 54000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 93,
+        "source_text": "固定资产折旧、无形资产摊销  54,000  50,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "operating_cash_flow",
+        "period_end": "2025-12-31",
+        "value": 142000,
+        "unit_multiplier": 1000,
+        "currency": "CNY",
+        "page": 93,
+        "source_text": "经营活动产生的现金流量净额  142,000  120,000",
+        "confidence": "high",
+        "note": null
+      },
+      {
+        "field": "capex",
+        "period_end": "2025-12-31",
+        "value": 165000,
+        "unit_multiplier": 1,
+        "currency": "CNY",
+        "page": 93,
+        "source_text": "购建固定资产、无形资产和其他长期资产支付的现金  (165,000)  (150,000)",
+        "confidence": "high",
+        "note": null
+      }
+    ]
+  }
+}

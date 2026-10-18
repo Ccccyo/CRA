@@ -1,0 +1,22 @@
+{"id": "QA-001", "split": "dev", "question": "接口报错 EAPI030 是什么原因，怎么处理？", "answerable": true, "gold_source": "dnb_api_guide_mock.md", "must_include": ["凭证"]}
+{"id": "QA-002", "split": "dev", "question": "Merge 返回 200 OK 是不是就说明绑定成功了？", "answerable": true, "gold_source": "dnb_api_guide_mock.md", "must_include": ["异步"]}
+{"id": "QA-003", "split": "dev", "question": "国家代码填 YT 查不到公司怎么办？", "answerable": true, "gold_source": "faq_mock.md", "must_include": ["FR"]}
+{"id": "QA-004", "split": "dev", "question": "波多黎各的客户在 Lookup 时 Country 和 State 怎么填？", "answerable": true, "gold_source": "faq_mock.md", "must_include": ["US", "PR"]}
+{"id": "QA-005", "split": "dev", "question": "定性分里权重最大的是哪一项？", "answerable": true, "gold_source": "cra_scoring_rules_mock.md", "must_include": ["40%"]}
+{"id": "QA-006", "split": "dev", "question": "额度 60 万美元由谁审批？", "answerable": true, "gold_source": "credit_policy_mock.md", "must_include": ["区域信用经理"]}
+{"id": "QA-007", "split": "dev", "question": "Risk Class 04 的客户多久复审一次？", "answerable": true, "gold_source": "credit_policy_mock.md", "must_include": ["6"]}
+{"id": "QA-008", "split": "dev", "question": "公司的差旅报销标准是多少？", "answerable": false, "gold_source": null, "must_include": []}
+{"id": "QA-009", "split": "dev", "question": "D&B 的 Paydex 分数是怎么计算出来的？", "answerable": false, "gold_source": null, "must_include": []}
+{"id": "QA-010", "split": "dev", "question": "Merge 后 FS_ 字段全是空的，是绑定失败了吗？", "answerable": true, "gold_source": "dnb_api_guide_mock.md", "must_include": ["Product Profile"]}
+{"id": "QA-011", "split": "test", "question": "有形净资产为负数时可以用哪种额度计算方法？", "answerable": true, "gold_source": "cra_scoring_rules_mock.md", "must_include": ["Net Worth"]}
+{"id": "QA-012", "split": "test", "question": "EAPI135 报错一般是什么问题？", "answerable": true, "gold_source": "dnb_api_guide_mock.md", "must_include": ["空"]}
+{"id": "QA-013", "split": "test", "question": "加拿大客户 Lookup 时必须填哪个字段？", "answerable": true, "gold_source": "dnb_api_guide_mock.md", "must_include": ["State"]}
+{"id": "QA-014", "split": "test", "question": "最新财报距今多久算过期？", "answerable": true, "gold_source": "credit_policy_mock.md", "must_include": ["18"]}
+{"id": "QA-015", "split": "test", "question": "公司股票的分红政策是什么？", "answerable": false, "gold_source": null, "must_include": []}
+{"id": "QA-016", "split": "test", "question": "客户选了 Priority - Above Average Margin，Customer Distinction 打几分？", "answerable": true, "gold_source": "cra_scoring_rules_mock.md", "must_include": ["2.0"]}
+{"id": "QA-017", "split": "dev", "question": "D&B 评级 3A2 里的 3A 和 2 分别代表什么？", "answerable": true, "gold_source": "公开资料/dnb_rating_key_public.md", "must_include": ["财务实力"]}
+{"id": "QA-018", "split": "dev", "question": "墨西哥的 OECD 国家风险分类是几类？Sovereign Rating 参考选哪档？", "answerable": true, "gold_source": "公开资料/country_risk_public.md", "must_include": ["3"]}
+{"id": "QA-019", "split": "test", "question": "化工同行的资产负债率中位数是多少？", "answerable": true, "gold_source": "公开资料/industry_benchmarks_chemicals.md", "must_include": ["59.83"]}
+{"id": "QA-020", "split": "test", "question": "报表上商誉和无形资产合在一行时，goodwill 字段怎么填？", "answerable": true, "gold_source": "公开资料/accounting_field_definitions.md", "must_include": ["null"]}
+{"id": "QA-021", "split": "dev", "question": "以前有没有因为 D&B 主体没确认而不授信的案例？", "answerable": true, "gold_source": "历史申报/cra_submissions_mock.csv", "must_include": ["Corvel"]}
+{"id": "QA-022", "split": "test", "question": "历史上哪个客户走过例外审批，原因是什么？", "answerable": true, "gold_source": "历史申报/cra_submissions_mock.csv", "must_include": ["Rheinland"]}

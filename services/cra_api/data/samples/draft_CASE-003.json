@@ -1,0 +1,13 @@
+{
+  "note": "MOCK：预先录制的「有问题」模型输出，用来演示校验如何拦截编造数字、缺出处和绝对化表述。",
+  "llm_output": {
+    "company_description": "Quimica del Pacifico SA de CV 位于墨西哥 Guadalajara，D&B（模拟）编号 900000601 [S2]。公司为工业溶剂和涂料助剂分销商 [S3]。",
+    "risk_comments": "2025 年营业收入 1,240,000,000 墨西哥比索，较上年增长 [S1]。利息保障倍数由 2.5 降至 1.9，偿债能力减弱 [S1]。资产负债率 68.6%，杠杆偏高 [S1]。预计 2026 年营业收入将增长 15% [S1]。付款习惯为 15 to 20 arrear，近 12 个月平均逾期 17 天 [S3]。该客户长期合作，不会违约。",
+    "qualitative": {
+      "pay_habits": {"choice": "15 to 20 arrear", "reason": "SAP 应收显示近 12 个月平均逾期 17 天 [S3]"},
+      "company_type": {"choice": "Private - unaudited", "reason": "管理层报表，未审计 [S3]"},
+      "sovereign_rating": {"choice": "grade B", "reason": "墨西哥主权评级 BBB [S3]"},
+      "customer_distinction": {"choice": "Key account", "reason": "长期合作客户"}
+    }
+  }
+}

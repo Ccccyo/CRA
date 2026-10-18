@@ -1,0 +1,20 @@
+{
+  "case_id": "CASE-003",
+  "title": "Quimica del Pacifico 年度复审（扫描件）",
+  "mock": true,
+  "bp": "1000601",
+  "credit_segment": "0001",
+  "requested_cl_usd": 800000,
+  "statement_currency": "MXN",
+  "customer": {"name": "Quimica del Pacifico", "country": "MX", "state": "", "city": "Guadalajara"},
+  "expected_entity_id": "900000601",
+  "business": "工业溶剂和涂料助剂分销商",
+  "new_year": {"period_end": "2025-12-31", "pdf": "qdp_estados_financieros_2025_scan.pdf", "scan": true},
+  "inputs": {
+    "pay_habits_from_ar": "15 to 20 arrear",
+    "pay_habits_detail": "近 12 个月平均逾期 17 天",
+    "customer_distinction_from_sales": "Standard",
+    "company_type_hint": "私营公司，管理层报表，未审计",
+    "sovereign_hint": "墨西哥，主权评级 BBB"
+  }
+}
