@@ -29,6 +29,8 @@ yarn-error.log*
 *.db
 *.db-shm
 *.db-wal
+/*.xlsx
+/*.docx
 
 # Documentation
 *.md
