@@ -4,7 +4,21 @@ import { NextRequest } from 'next/server';
 import { sql } from 'drizzle-orm';
 
 import { db } from '@/core/db';
+import { isMaintenanceAdministrator } from '@/core/rbac/permission';
 import { getSignUser } from '@/shared/models/user';
+import {
+  bindManagedFile,
+  currentBoundFile,
+  deleteRetiredManagedFile,
+  findManagedFile,
+  managedFileBrowserUrl,
+  managedFileReadLocation,
+  markManagedFileProcessing,
+  markManagedFileReady,
+  markManagedFileRejected,
+  retireBoundFile,
+  type ManagedFileRecord,
+} from '@/shared/services/managed-files';
 import { getUserRoles, hasPermission } from '@/shared/services/rbac';
 
 type RouteContext = { params: Promise<{ path: string[] }> };
@@ -172,7 +186,8 @@ async function readWorkflowStage(caseId: string) {
 async function resolveFinancialSignoff(
   caseId: string,
   requestedTaskId: number,
-  resolution: Record<string, unknown>
+  resolution: Record<string, unknown>,
+  actor: { id: string; name: string; role: string }
 ) {
   const database = db();
   await database.transaction(async (tx: ReturnType<typeof db>) => {
@@ -237,6 +252,9 @@ async function resolveFinancialSignoff(
       ...((notes.human_resolutions as Record<string, unknown>) || {}),
       financial_signoff: {
         ...resolution,
+        resolved_by: actor.id,
+        resolved_by_name: actor.name,
+        resolved_by_role: actor.role,
         resolved_at: new Date().toISOString(),
       },
     };
@@ -318,14 +336,98 @@ async function readFinancialReport(caseId: string) {
   });
 }
 
-function requiredPermission(method: string, path: string[]) {
+async function managedSourceRedirect(
+  file: ManagedFileRecord | null,
+  disposition: 'attachment' | 'inline' = 'attachment'
+) {
+  if (!file || file.storage_provider !== 'r2') return null;
+  const url = await managedFileBrowserUrl(file, disposition);
+  return url ? Response.redirect(url, 307) : null;
+}
+
+async function addManagedFileHeaders(
+  headers: Headers,
+  file: ManagedFileRecord,
+  prefix = 'X-CRA-File'
+) {
+  const location = await managedFileReadLocation(file);
+  headers.set(`${prefix}-Id`, file.id);
+  headers.set(`${prefix}-Name`, encodeURIComponent(file.original_filename));
+  headers.set(`${prefix}-Size`, String(file.size_bytes));
+  headers.set(`${prefix}-Sha256`, file.sha256 || '');
+  headers.set(`${prefix}-Mime`, file.mime_declared);
+  if (location.url) headers.set(`${prefix}-Url`, location.url);
+  if (location.localPath) headers.set(`${prefix}-Path`, location.localPath);
+}
+
+function expectedPurpose(path: string[]) {
+  if (path[0] === 'knowledge' && path[1] === 'documents') {
+    return 'knowledge_source';
+  }
+  if (path[0] === 'cases' && path[2] === 'financial-report') {
+    return 'financial_report';
+  }
+  if (path[0] === 'cases' && (path.length === 1 || path[1] === 'preview')) {
+    return 'case_excel';
+  }
+  return '';
+}
+
+async function requiredPermission(method: string, path: string[]) {
   if (path[0] === 'knowledge') {
-    if (method === 'GET' && path.length === 1) return 'cra.knowledge.read';
+    if (method === 'GET' || method === 'HEAD') return 'cra.knowledge.read';
     return 'admin.access';
   }
   if (method === 'GET' || method === 'HEAD') return 'cra.cases.read';
-  if (path.includes('resolve')) return 'cra.cases.approve';
+  if (path.includes('resolve')) {
+    const stage =
+      path[0] === 'cases' && path[1] ? await readWorkflowStage(path[1]) : '';
+    return (
+      (
+        {
+          resolve_entity: 'cra.cases.entity.confirm',
+          financial_signoff: 'cra.cases.financial.signoff',
+          risk_signoff: 'cra.cases.risk.signoff',
+          final_signoff: 'cra.cases.final.approve',
+        } as Record<string, string>
+      )[stage] || 'cra.cases.final.approve'
+    );
+  }
   return 'cra.cases.write';
+}
+
+async function caseCapabilities(userId: string, maintenanceOnly = false) {
+  if (maintenanceOnly) {
+    return {
+      can_write: false,
+      can_confirm_entity: false,
+      can_sign_financial: false,
+      can_sign_risk: false,
+      can_approve_final: false,
+      maintenance_read_only: true,
+    };
+  }
+  const [
+    canWrite,
+    canConfirmEntity,
+    canSignFinancial,
+    canSignRisk,
+    canApproveFinal,
+  ] = await Promise.all([
+    hasPermission(userId, 'cra.cases.write'),
+    hasPermission(userId, 'cra.cases.entity.confirm'),
+    hasPermission(userId, 'cra.cases.financial.signoff'),
+    hasPermission(userId, 'cra.cases.risk.signoff'),
+    hasPermission(userId, 'cra.cases.final.approve'),
+  ]);
+  return {
+    can_write: canWrite,
+    can_confirm_entity: canConfirmEntity,
+    can_sign_financial: canSignFinancial,
+    can_sign_risk: canSignRisk,
+    can_approve_final: canApproveFinal,
+    maintenance_read_only: false,
+  };
 }
 
 async function forward(request: NextRequest, context: RouteContext) {
@@ -338,8 +440,22 @@ async function forward(request: NextRequest, context: RouteContext) {
   }
 
   const { path } = await context.params;
-  const permission = requiredPermission(request.method, path);
-  if (!(await hasPermission(user.id, permission))) {
+  const roles = await getUserRoles(user.id);
+  const maintenanceOnly = isMaintenanceAdministrator(roles);
+  const isReadRequest = request.method === 'GET' || request.method === 'HEAD';
+  const isMaintenanceCaseRead =
+    maintenanceOnly && isReadRequest && path[0] === 'cases';
+  if (maintenanceOnly && path[0] !== 'knowledge' && !isMaintenanceCaseRead) {
+    return Response.json(
+      {
+        detail:
+          '系统管理员可只读查看全部案件并负责知识库维护，但不能创建、编辑、运行或签署案件。',
+      },
+      { status: 403 }
+    );
+  }
+  const permission = await requiredPermission(request.method, path);
+  if (!isMaintenanceCaseRead && !(await hasPermission(user.id, permission))) {
     return Response.json(
       { detail: `当前账号缺少权限：${permission}` },
       { status: 403 }
@@ -354,7 +470,6 @@ async function forward(request: NextRequest, context: RouteContext) {
     );
   }
 
-  const roles = await getUserRoles(user.id);
   const roleNames = roles.map((role) => role.name);
   const forwardedRole = roleNames.includes('super_admin')
     ? 'super_admin'
@@ -385,7 +500,10 @@ async function forward(request: NextRequest, context: RouteContext) {
     try {
       const caseDetail = await readCaseDetail(path[1]);
       return caseDetail
-        ? Response.json(caseDetail)
+        ? Response.json({
+            ...caseDetail,
+            capabilities: await caseCapabilities(user.id, maintenanceOnly),
+          })
         : Response.json({ detail: '案件不存在' }, { status: 404 });
     } catch {
       return Response.json(
@@ -403,6 +521,13 @@ async function forward(request: NextRequest, context: RouteContext) {
     path[3] === 'source'
   ) {
     try {
+      const managed = await currentBoundFile(
+        'case',
+        path[1],
+        'financial_report'
+      );
+      const redirect = await managedSourceRedirect(managed, 'inline');
+      if (redirect) return redirect;
       return (
         (await readFinancialReport(path[1])) ||
         Response.json(
@@ -413,6 +538,32 @@ async function forward(request: NextRequest, context: RouteContext) {
     } catch {
       return Response.json({ detail: '财报原文文件不存在' }, { status: 404 });
     }
+  }
+
+  if (
+    request.method === 'GET' &&
+    path.length === 3 &&
+    path[0] === 'cases' &&
+    path[2] === 'source'
+  ) {
+    const redirect = await managedSourceRedirect(
+      await currentBoundFile('case', path[1], 'case_excel')
+    );
+    if (redirect) return redirect;
+  }
+
+  if (
+    request.method === 'GET' &&
+    path.length === 4 &&
+    path[0] === 'knowledge' &&
+    path[1] === 'documents' &&
+    path[3] === 'source'
+  ) {
+    const redirect = await managedSourceRedirect(
+      await currentBoundFile('knowledge_document', path[2], 'knowledge_source'),
+      'inline'
+    );
+    if (redirect) return redirect;
   }
 
   if (
@@ -430,11 +581,47 @@ async function forward(request: NextRequest, context: RouteContext) {
       const result = await resolveFinancialSignoff(
         path[1],
         Number(path[3]),
-        body.resolution || {}
+        body.resolution || {},
+        {
+          id: user.id,
+          name: user.name || user.email,
+          role: forwardedRole,
+        }
       );
-      return result
-        ? Response.json(result)
-        : Response.json({ detail: '案件不存在' }, { status: 404 });
+      if (result) {
+        // This signoff writes PostgreSQL directly; refresh the private case
+        // projection after commit. A failed refresh must not replay a signoff.
+        const baseUrl =
+          process.env.CRA_API_INTERNAL_URL || 'http://127.0.0.1:8001';
+        try {
+          const refreshed = await fetch(
+            `${baseUrl.replace(/\/$/, '')}/cases/${encodeURIComponent(path[1])}/evidence/reindex`,
+            {
+              method: 'POST',
+              headers: {
+                'X-CRA-Service-Secret': sharedSecret,
+                'X-CRA-User': user.id,
+                'X-CRA-Name': encodeURIComponent(user.name || user.email),
+                'X-CRA-Role': forwardedRole,
+              },
+              cache: 'no-store',
+              signal: AbortSignal.timeout(5_000),
+            }
+          );
+          return Response.json({
+            ...result,
+            rag_index_status: refreshed.ok
+              ? 'current'
+              : 'retry_on_next_case_query',
+          });
+        } catch {
+          return Response.json({
+            ...result,
+            rag_index_status: 'retry_on_next_case_query',
+          });
+        }
+      }
+      return Response.json({ detail: '案件不存在' }, { status: 404 });
     } catch {
       return Response.json(
         { detail: '财务证据签署失败，请刷新后重试' },
@@ -460,6 +647,83 @@ async function forward(request: NextRequest, context: RouteContext) {
   const contentType = request.headers.get('content-type');
   if (contentType) headers.set('Content-Type', contentType);
 
+  let requestBody: ArrayBuffer | undefined;
+  let jsonBody: Record<string, unknown> = {};
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    requestBody = await request.arrayBuffer();
+    if (contentType?.includes('application/json') && requestBody.byteLength) {
+      try {
+        jsonBody = JSON.parse(new TextDecoder().decode(requestBody)) as Record<
+          string,
+          unknown
+        >;
+      } catch {
+        return Response.json(
+          { detail: 'JSON 请求体格式无效' },
+          { status: 400 }
+        );
+      }
+    }
+  }
+
+  let managedUpload: ManagedFileRecord | null = null;
+  const managedFileId = String(jsonBody.file_id || '');
+  if (managedFileId) {
+    managedUpload = await findManagedFile(managedFileId, { ownerId: user.id });
+    const purpose = expectedPurpose(path);
+    if (!managedUpload || (purpose && managedUpload.purpose !== purpose)) {
+      return Response.json(
+        { detail: '上传文件不存在或用途不匹配' },
+        { status: 404 }
+      );
+    }
+    if (!['RECEIVED', 'READY', 'REJECTED'].includes(managedUpload.status)) {
+      return Response.json(
+        { detail: `文件当前状态不可处理：${managedUpload.status}` },
+        { status: 409 }
+      );
+    }
+    await addManagedFileHeaders(headers, managedUpload);
+    if (jsonBody.duplicate_mode) {
+      headers.set('X-CRA-Duplicate-Mode', String(jsonBody.duplicate_mode));
+    }
+    if (jsonBody.library_id) {
+      headers.set('X-CRA-Library-Id', String(jsonBody.library_id));
+    }
+    if (jsonBody.title) {
+      headers.set(
+        'X-CRA-Document-Title',
+        encodeURIComponent(String(jsonBody.title))
+      );
+    }
+    await markManagedFileProcessing(managedUpload.id);
+  }
+
+  if (path[0] === 'cases' && path[1] && path[1] !== 'preview') {
+    const caseSource = await currentBoundFile('case', path[1], 'case_excel');
+    if (caseSource)
+      await addManagedFileHeaders(headers, caseSource, 'X-CRA-Case-Source');
+  }
+  if (
+    path[0] === 'knowledge' &&
+    path[1] === 'documents' &&
+    path[2] &&
+    path[3] === 'preview'
+  ) {
+    const knowledgeSource = await currentBoundFile(
+      'knowledge_document',
+      path[2],
+      'knowledge_source'
+    );
+    if (knowledgeSource) {
+      await addManagedFileHeaders(
+        headers,
+        knowledgeSource,
+        'X-CRA-Knowledge-Source'
+      );
+    }
+  }
+
   try {
     const timeoutMs =
       request.method === 'GET' || request.method === 'HEAD' ? 15_000 : 120_000;
@@ -469,7 +733,7 @@ async function forward(request: NextRequest, context: RouteContext) {
       body:
         request.method === 'GET' || request.method === 'HEAD'
           ? undefined
-          : await request.arrayBuffer(),
+          : requestBody,
       cache: 'no-store',
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -482,6 +746,83 @@ async function forward(request: NextRequest, context: RouteContext) {
     ]) {
       const value = upstream.headers.get(name);
       if (value) responseHeaders.set(name, value);
+    }
+    if (managedUpload) {
+      const payload = await upstream.arrayBuffer();
+      let responseJson: Record<string, unknown> | null = null;
+      if (upstream.headers.get('content-type')?.includes('application/json')) {
+        try {
+          responseJson = JSON.parse(new TextDecoder().decode(payload));
+        } catch {
+          responseJson = null;
+        }
+      }
+      if (upstream.ok) {
+        if (path[0] === 'cases' && path.length === 1 && responseJson?.case_id) {
+          await bindManagedFile({
+            fileId: managedUpload.id,
+            entityType: 'case',
+            entityId: String(responseJson.case_id),
+            role: 'case_excel',
+            actorUserId: user.id,
+          });
+        } else if (
+          path[0] === 'cases' &&
+          path[2] === 'financial-report' &&
+          path[1]
+        ) {
+          await bindManagedFile({
+            fileId: managedUpload.id,
+            entityType: 'case',
+            entityId: path[1],
+            role: 'financial_report',
+            actorUserId: user.id,
+          });
+        } else if (
+          path[0] === 'knowledge' &&
+          path[1] === 'documents' &&
+          path.length === 2 &&
+          responseJson?.id
+        ) {
+          await bindManagedFile({
+            fileId: managedUpload.id,
+            entityType: 'knowledge_document',
+            entityId: String(responseJson.id),
+            role: 'knowledge_source',
+            actorUserId: user.id,
+          });
+        } else {
+          await markManagedFileReady(managedUpload.id);
+        }
+      } else {
+        const detail = responseJson?.detail;
+        await markManagedFileRejected(
+          managedUpload.id,
+          typeof detail === 'string' ? detail : `upstream_${upstream.status}`
+        );
+      }
+      return new Response(payload, {
+        status: upstream.status,
+        headers: responseHeaders,
+      });
+    }
+
+    if (
+      upstream.ok &&
+      request.method === 'DELETE' &&
+      path.length === 3 &&
+      path[0] === 'knowledge' &&
+      path[1] === 'documents'
+    ) {
+      const retired = await retireBoundFile({
+        entityType: 'knowledge_document',
+        entityId: path[2],
+        role: 'knowledge_source',
+        actorUserId: user.id,
+      });
+      await Promise.all(
+        retired.map((fileId) => deleteRetiredManagedFile(fileId, user.id))
+      );
     }
     return new Response(upstream.body, {
       status: upstream.status,

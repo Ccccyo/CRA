@@ -66,10 +66,28 @@ export const PERMISSIONS = {
   CRA_CASES_READ: 'cra.cases.read',
   CRA_CASES_WRITE: 'cra.cases.write',
   CRA_CASES_APPROVE: 'cra.cases.approve',
+  CRA_CASES_ENTITY_CONFIRM: 'cra.cases.entity.confirm',
+  CRA_CASES_FINANCIAL_SIGNOFF: 'cra.cases.financial.signoff',
+  CRA_CASES_RISK_SIGNOFF: 'cra.cases.risk.signoff',
+  CRA_CASES_FINAL_APPROVE: 'cra.cases.final.approve',
   CRA_KNOWLEDGE_READ: 'cra.knowledge.read',
   CRA_KNOWLEDGE_HISTORY_READ: 'cra.knowledge.history.read',
   CRA_QUALITY_MANAGE: 'cra.quality.manage',
 } as const;
+
+const MAINTENANCE_ADMIN_ROLES = new Set(['admin', 'super_admin']);
+
+/**
+ * CRA system administrators maintain platform data and knowledge sources.
+ * Their wildcard admin permissions must never spill into case operations.
+ */
+export function isMaintenanceAdministrator(
+  roles: Array<string | { name: string }>
+): boolean {
+  return roles.some((role) =>
+    MAINTENANCE_ADMIN_ROLES.has(typeof role === 'string' ? role : role.name)
+  );
+}
 
 /**
  * Permission guard error

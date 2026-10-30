@@ -24,43 +24,48 @@ class Chunk:
         return f"{self.source}（{where}）" if where else self.source
 
 
-def _split_long(text: str, max_chars: int) -> List[str]:
-    """按段落合并，单段不超过 max_chars。"""
-    parts, buf = [], ""
-    for para in re.split(r"\n\s*\n", text):
-        para = para.strip()
-        if not para:
-            continue
-        if len(para) > max_chars:
-            if buf.strip():
-                parts.append(buf.strip())
-                buf = ""
-            remaining = para
-            while len(remaining) > max_chars:
-                window = remaining[: max_chars + 1]
-                cut = max(
-                    window.rfind(mark)
-                    for mark in ("\n", "。", "！", "？", ". ", "! ", "? ", " ")
-                )
-                if cut < max_chars // 2:
-                    cut = max_chars
-                else:
-                    cut += 1
-                parts.append(remaining[:cut].strip())
-                remaining = remaining[cut:].strip()
-            if remaining:
-                buf = remaining + "\n\n"
-            continue
-        if buf and len(buf) + len(para) > max_chars:
-            parts.append(buf.strip())
-            buf = ""
-        buf += para + "\n\n"
-    if buf.strip():
-        parts.append(buf.strip())
+def _split_long(
+    text: str, max_chars: int, overlap_chars: int = 100
+) -> List[str]:
+    """Split at readable boundaries and retain a small context overlap."""
+    content = "\n\n".join(
+        paragraph.strip()
+        for paragraph in re.split(r"\n\s*\n", text)
+        if paragraph.strip()
+    )
+    if not content:
+        return []
+    overlap_chars = max(0, min(overlap_chars, max_chars // 3))
+    parts: List[str] = []
+    start = 0
+    while start < len(content):
+        hard_end = min(start + max_chars, len(content))
+        end = hard_end
+        if hard_end < len(content):
+            window = content[start : hard_end + 1]
+            cut = max(
+                window.rfind(mark)
+                for mark in ("\n\n", "\n", "。", "！", "？", ". ", "! ", "? ", " ")
+            )
+            if cut >= max_chars // 2:
+                end = start + cut + 1
+        part = content[start:end].strip()
+        if part:
+            parts.append(part)
+        if end >= len(content):
+            break
+        start = max(end - overlap_chars, start + 1)
+        while start < len(content) and content[start].isspace():
+            start += 1
     return parts
 
 
-def chunk_markdown(text: str, source: str, max_chars: int = 1200) -> List[Chunk]:
+def chunk_markdown(
+    text: str,
+    source: str,
+    max_chars: int = 800,
+    overlap_chars: int = 100,
+) -> List[Chunk]:
     """按 Markdown 标题切段；标题路径写进 section，并作为段落开头帮助检索。"""
     chunks: List[Chunk] = []
     heading_path: List[str] = []
@@ -71,7 +76,8 @@ def chunk_markdown(text: str, source: str, max_chars: int = 1200) -> List[Chunk]
         if not content:
             return
         section = " > ".join(heading_path)
-        for piece in _split_long(content, max_chars):
+        body_limit = max(200, max_chars - len(section) - (1 if section else 0))
+        for piece in _split_long(content, body_limit, overlap_chars):
             chunks.append(
                 Chunk(id=f"{source}#{len(chunks)}", text=f"{section}\n{piece}" if section else piece,
                       source=source, section=section)
@@ -90,10 +96,15 @@ def chunk_markdown(text: str, source: str, max_chars: int = 1200) -> List[Chunk]
     return chunks
 
 
-def chunk_pages(pages: Sequence[Page], source: str, max_chars: int = 1500) -> List[Chunk]:
+def chunk_pages(
+    pages: Sequence[Page],
+    source: str,
+    max_chars: int = 1000,
+    overlap_chars: int = 120,
+) -> List[Chunk]:
     chunks: List[Chunk] = []
     for page in pages:
-        for piece in _split_long(page.text, max_chars):
+        for piece in _split_long(page.text, max_chars, overlap_chars):
             chunks.append(Chunk(id=f"{source}#p{page.number}-{len(chunks)}", text=piece,
                                 source=source, page=page.number))
     return chunks

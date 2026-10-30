@@ -9,6 +9,7 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 import { envConfigs } from '@/config';
@@ -667,6 +668,151 @@ export const craKnowledgeChunk = table(
       .notNull(),
   },
   (table) => [index('idx_cra_knowledge_chunk_document').on(table.documentId)]
+);
+
+export const craKnowledgeAuditLog = table(
+  'cra_knowledge_audit_log',
+  {
+    id: serial('id').primaryKey(),
+    action: text('action').notNull(),
+    documentId: text('document_id').notNull(),
+    libraryId: text('library_id').notNull(),
+    title: text('title').notNull(),
+    sourceFilename: text('source_filename').notNull().default(''),
+    chunkCount: integer('chunk_count').notNull().default(0),
+    actorUserId: text('actor_user_id').notNull(),
+    actorName: text('actor_name').notNull(),
+    actorRole: text('actor_role').notNull(),
+    snapshot: jsonb('snapshot')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('idx_cra_knowledge_audit_document').on(table.documentId, table.id),
+  ]
+);
+
+export const craFileObject = table(
+  'cra_file_object',
+  {
+    id: text('id').primaryKey(),
+    purpose: text('purpose').notNull(),
+    storageProvider: text('storage_provider').notNull(),
+    bucket: text('bucket').notNull().default(''),
+    objectKey: text('object_key').notNull(),
+    originalFilename: text('original_filename').notNull(),
+    mimeDeclared: text('mime_declared').notNull(),
+    mimeDetected: text('mime_detected').notNull().default(''),
+    sizeBytes: integer('size_bytes').notNull(),
+    sha256: text('sha256').notNull().default(''),
+    etag: text('etag').notNull().default(''),
+    status: text('status').notNull().default('INITIATED'),
+    version: integer('version').notNull().default(1),
+    parentFileId: text('parent_file_id'),
+    uploadedBy: text('uploaded_by').notNull(),
+    metadata: jsonb('metadata')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    readyAt: timestamp('ready_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_cra_file_object_key').on(table.objectKey),
+    index('idx_cra_file_owner_status').on(table.uploadedBy, table.status),
+    index('idx_cra_file_parent').on(table.parentFileId),
+  ]
+);
+
+export const craUploadSession = table(
+  'cra_upload_session',
+  {
+    id: text('id').primaryKey(),
+    fileId: text('file_id')
+      .notNull()
+      .references(() => craFileObject.id, { onDelete: 'cascade' }),
+    idempotencyKey: text('idempotency_key').notNull(),
+    expectedSizeBytes: integer('expected_size_bytes').notNull(),
+    expectedMime: text('expected_mime').notNull(),
+    expectedSha256: text('expected_sha256').notNull().default(''),
+    status: text('status').notNull().default('OPEN'),
+    createdBy: text('created_by').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_cra_upload_idempotency').on(
+      table.createdBy,
+      table.idempotencyKey
+    ),
+    index('idx_cra_upload_file').on(table.fileId),
+  ]
+);
+
+export const craFileBinding = table(
+  'cra_file_binding',
+  {
+    id: serial('id').primaryKey(),
+    fileId: text('file_id')
+      .notNull()
+      .references(() => craFileObject.id, { onDelete: 'restrict' }),
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    role: text('role').notNull(),
+    version: integer('version').notNull().default(1),
+    isCurrent: boolean('is_current').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_cra_file_binding_version').on(
+      table.entityType,
+      table.entityId,
+      table.role,
+      table.version
+    ),
+    index('idx_cra_file_binding_current').on(
+      table.entityType,
+      table.entityId,
+      table.role,
+      table.isCurrent
+    ),
+    index('idx_cra_file_binding_file').on(table.fileId),
+  ]
+);
+
+export const craFileAuditLog = table(
+  'cra_file_audit_log',
+  {
+    id: serial('id').primaryKey(),
+    fileId: text('file_id').notNull(),
+    actorUserId: text('actor_user_id').notNull(),
+    action: text('action').notNull(),
+    result: text('result').notNull(),
+    requestId: text('request_id').notNull().default(''),
+    detail: jsonb('detail')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index('idx_cra_file_audit_file').on(table.fileId, table.id)]
 );
 
 export const craDataMigration = table('cra_data_migration', {

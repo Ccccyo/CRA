@@ -15,7 +15,7 @@
     "demo_accounts_title": "Demo 账号",
     "demo_accounts_description": "选择账号可自动填入邮箱，密码仍需自行输入。",
     "demo_admin_title": "系统管理员",
-    "demo_admin_permissions": "全部 CRA 功能、用户和权限管理",
+    "demo_admin_permissions": "查看全部案件、维护知识库、用户和权限（不可办理案件）",
     "demo_analyst_title": "信用分析师",
     "demo_analyst_permissions": "建案、证据处理、修改草稿和制度 RAG",
     "demo_reviewer_title": "高级信用分析师",

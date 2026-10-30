@@ -1,8 +1,5 @@
 import bundleAnalyzer from '@next/bundle-analyzer';
-import { createMDX } from 'fumadocs-mdx/next';
 import createNextIntlPlugin from 'next-intl/plugin';
-
-const withMDX = createMDX();
 
 const withBundleAnalyzer = bundleAnalyzer({
   enabled: process.env.ANALYZE === 'true',
@@ -15,9 +12,11 @@ const withNextIntl = createNextIntlPlugin({
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: process.env.VERCEL ? undefined : 'standalone',
+  // Keep the deployment default unchanged while allowing isolated verification builds.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   reactStrictMode: false,
   allowedDevOrigins: ['127.0.0.1'],
-  pageExtensions: ['ts', 'tsx', 'js', 'jsx', 'md', 'mdx'],
+  pageExtensions: ['ts', 'tsx', 'js', 'jsx'],
   images: {
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
@@ -54,10 +53,8 @@ const nextConfig = {
   },
   experimental: {
     turbopackFileSystemCacheForDev: true,
-    // Disable mdxRs for Vercel deployment compatibility with fumadocs-mdx
-    ...(process.env.VERCEL ? {} : { mdxRs: true }),
   },
   reactCompiler: true,
 };
 
-export default withBundleAnalyzer(withNextIntl(withMDX(nextConfig)));
+export default withBundleAnalyzer(withNextIntl(nextConfig));

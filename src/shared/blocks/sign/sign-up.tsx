@@ -42,13 +42,6 @@ function signUpErrorMessage(error: unknown) {
   return message || '注册失败，请稍后重试。';
 }
 
-type AffiliateWindow = Window & {
-  Affonso?: { signup: (email: string) => void };
-  promotekit?: {
-    refer: (email: string, stripeCustomerId?: string) => void;
-  };
-};
-
 export function SignUp({
   configs,
   callbackUrl = '/',
@@ -79,28 +72,6 @@ export function SignUp({
       callbackUrl = `/${locale}${callbackUrl}`;
     }
   }
-
-  const reportAffiliate = ({
-    userEmail,
-    stripeCustomerId,
-  }: {
-    userEmail: string;
-    stripeCustomerId?: string;
-  }) => {
-    if (typeof window === 'undefined' || !configs) {
-      return;
-    }
-
-    const windowObject = window as AffiliateWindow;
-
-    if (configs.affonso_enabled === 'true' && windowObject.Affonso) {
-      windowObject.Affonso.signup(userEmail);
-    }
-
-    if (configs.promotekit_enabled === 'true' && windowObject.promotekit) {
-      windowObject.promotekit.refer(userEmail, stripeCustomerId);
-    }
-  };
 
   const handleSignUp = async () => {
     if (loading) {
@@ -133,9 +104,6 @@ export function SignUp({
             // Do NOT reset loading here; navigation may not have completed yet.
           },
           onSuccess: () => {
-            // report affiliate
-            reportAffiliate({ userEmail: normalizedEmail });
-
             router.push(callbackUrl);
           },
           onError: (error) => {

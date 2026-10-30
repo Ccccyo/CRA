@@ -22,6 +22,8 @@
 
    数据库、账号、角色和 RAG 配置详见 `docs/08-database-auth-and-rag.md`。
 
+   生产部署还需将 `FILE_STORAGE_BACKEND` 设为 `r2`，配置私有 R2 bucket 与 S3 API 凭证。浏览器只获得单对象短期上传地址，文件原件不经过 Vercel；完整配置与迁移步骤见 `docs/15-enterprise-upload-storage-design.md`。
+
 3. 首次运行：
 
    ```bash
@@ -63,3 +65,5 @@ pnpm test:api
 - `docs/05-test-and-user-review.md`：测试与用户验收方法
 - `docs/06-final-review.md`：最终实测结论
 - `docs/08-database-auth-and-rag.md`：数据库、账号、权限、案件和 RAG 配置
+- `docs/12-agent-rag-mcp-review-and-release-gate.md`：Skill、只读 MCP、RAG/Agent 改造的实测状态和发布门禁。GLEIF MCP 为可选依赖：`services/cra_api/.venv/bin/python -m pip install -r services/cra_api/requirements-mcp.txt`；仅在受控测试环境显式设置 `CRA_ENABLE_GLEIF_MCP=true` 后，对明确给出的 LEI 做只读查询。
+- `docs/15-enterprise-upload-storage-design.md`：文件直传、数据库元数据、版本、审计、R2 权限和无停机迁移方案

@@ -8,7 +8,24 @@ from cra_api import store_postgres
 class FakeConnection:
     def __init__(self):
         self.closed = False
+        self.autocommit = True
+        self.statements = []
         self.info = SimpleNamespace(transaction_status=TransactionStatus.IDLE)
+
+    def cursor(self):
+        connection = self
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def execute(self, statement):
+                connection.statements.append(statement)
+
+        return Cursor()
 
     def rollback(self):
         pass
@@ -34,4 +51,6 @@ def test_connection_pool_reuses_idle_connection(monkeypatch):
 
     assert second is first
     assert len(created) == 1
+    assert first.autocommit is False
+    assert len(first.statements) == 3
 

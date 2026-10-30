@@ -10,7 +10,7 @@ IDF 用 Lucene/Elasticsearch 的平滑公式 log(1 + (N - n + 0.5) / (n + 0.5))�
 import math
 import re
 from collections import Counter
-from typing import List, Sequence
+from typing import Callable, List, Optional, Sequence
 
 import jieba
 
@@ -60,8 +60,17 @@ class KeywordIndex:
                 score += self._idf[t] * tf * (self.K1 + 1) / norm
         return score
 
-    def search(self, query: str, k: int = 20) -> List[Hit]:
+    def search(
+        self,
+        query: str,
+        k: int = 20,
+        keep: Optional[Callable[[Chunk], bool]] = None,
+    ) -> List[Hit]:
         q = tokenize(query)
-        scored = [(self._score(q, i), i) for i in range(len(self.chunks))]
+        scored = [
+            (self._score(q, i), i)
+            for i, chunk in enumerate(self.chunks)
+            if keep is None or keep(chunk)
+        ]
         scored.sort(key=lambda x: x[0], reverse=True)
         return [Hit(self.chunks[i], s) for s, i in scored[:k] if s > 0]

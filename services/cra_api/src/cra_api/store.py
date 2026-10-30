@@ -142,6 +142,22 @@ class WorkflowStore:
                     metadata TEXT NOT NULL DEFAULT '{}',
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS knowledge_audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    action TEXT NOT NULL,
+                    document_id TEXT NOT NULL,
+                    library_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    source_filename TEXT NOT NULL DEFAULT '',
+                    chunk_count INTEGER NOT NULL DEFAULT 0,
+                    actor_user_id TEXT NOT NULL,
+                    actor_name TEXT NOT NULL,
+                    actor_role TEXT NOT NULL,
+                    snapshot TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_knowledge_audit_document
+                    ON knowledge_audit_log(document_id, id);
                 CREATE TABLE IF NOT EXISTS data_migrations (
                     id TEXT PRIMARY KEY,
                     completed_at TEXT NOT NULL
@@ -207,6 +223,12 @@ class WorkflowStore:
                 values,
             )
             conn.commit()
+        self.sync_case_knowledge(payload["case_id"])
+
+    def sync_case_knowledge(self, case_id: str) -> bool:
+        from cra.case_knowledge import safe_sync_after_write
+
+        return safe_sync_after_write(self, case_id)
 
     @staticmethod
     def _case_row(row: sqlite3.Row) -> Dict[str, Any]:
@@ -224,6 +246,17 @@ class WorkflowStore:
                 "SELECT * FROM cases WHERE case_id = ?", (case_id,)
             ).fetchone()
         return self._case_row(row) if row else None
+
+    def update_case_title(self, case_id: str, title: str) -> None:
+        with closing(self.connect()) as conn:
+            result = conn.execute(
+                "UPDATE cases SET title = ?, updated_at = ? WHERE case_id = ?",
+                (title, now_iso(), case_id),
+            )
+            if result.rowcount != 1:
+                raise KeyError(case_id)
+            conn.commit()
+        self.sync_case_knowledge(case_id)
 
     def cases(self) -> List[Dict[str, Any]]:
         with closing(self.connect()) as conn:
@@ -366,6 +399,7 @@ class WorkflowStore:
                 f"UPDATE workflow_state SET {assignments} WHERE case_id = ?", values
             )
             conn.commit()
+        self.sync_case_knowledge(case_id)
         return self.workflow(case_id)
 
     def add_event(
@@ -489,6 +523,7 @@ class WorkflowStore:
                 (case_id, json.dumps(payload, ensure_ascii=False), now_iso()),
             )
             conn.commit()
+        self.sync_case_knowledge(case_id)
 
     def notes(self, case_id: str) -> Dict[str, Any]:
         with closing(self.connect()) as conn:
@@ -656,26 +691,70 @@ class WorkflowStore:
         with closing(self.connect()) as conn:
             rows = conn.execute(
                 """
-                SELECT id, document_id, citation, section, page, content AS text
-                FROM knowledge_chunks ORDER BY document_id, id
+                SELECT chunk.id, chunk.document_id, chunk.citation,
+                       chunk.section, chunk.page, chunk.content AS text,
+                       chunk.metadata, document.library_id
+                FROM knowledge_chunks AS chunk
+                JOIN knowledge_documents AS document
+                  ON document.id = chunk.document_id
+                ORDER BY chunk.document_id, chunk.id
                 """
             ).fetchall()
-        return [dict(row) for row in rows]
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["metadata"] = json.loads(item.get("metadata") or "{}")
+            result.append(item)
+        return result
+
+    def knowledge_revision(self) -> str:
+        with closing(self.connect()) as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS chunk_count,
+                       COALESCE(MAX(updated_at), '') AS latest_update
+                FROM knowledge_chunks
+                """
+            ).fetchone()
+        return f"{row['chunk_count']}:{row['latest_update']}"
+
+    def knowledge_documents(self) -> List[Dict[str, Any]]:
+        with closing(self.connect()) as conn:
+            rows = conn.execute(
+                """
+                SELECT document.*, COUNT(chunk.id) AS chunk_count
+                FROM knowledge_documents AS document
+                LEFT JOIN knowledge_chunks AS chunk
+                  ON chunk.document_id = document.id
+                GROUP BY document.id
+                ORDER BY document.library_id, document.title
+                """
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["metadata"] = json.loads(item.get("metadata") or "{}")
+            item["chunk_count"] = int(item.get("chunk_count") or 0)
+            result.append(item)
+        return result
 
     def knowledge_document(self, document_id: str) -> Optional[Dict[str, Any]]:
         with closing(self.connect()) as conn:
             row = conn.execute(
-                "SELECT * FROM knowledge_documents WHERE id = ?", (document_id,)
+                """
+                SELECT document.*, COUNT(chunk.id) AS chunk_count
+                FROM knowledge_documents AS document
+                LEFT JOIN knowledge_chunks AS chunk ON chunk.document_id = document.id
+                WHERE document.id = ?
+                GROUP BY document.id
+                """,
+                (document_id,),
             ).fetchone()
         if row is None:
             return None
         item = dict(row)
         item["metadata"] = json.loads(item.get("metadata") or "{}")
-        item["chunk_count"] = sum(
-            1
-            for chunk in self.knowledge_chunks()
-            if chunk["document_id"] == document_id
-        )
+        item["chunk_count"] = int(item.get("chunk_count") or 0)
         return item
 
     def replace_knowledge_document(
@@ -740,8 +819,35 @@ class WorkflowStore:
             conn.commit()
         return self.knowledge_document(document["id"])
 
-    def delete_knowledge_document(self, document_id: str) -> bool:
+    def delete_knowledge_document(
+        self,
+        document_id: str,
+        audit: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         with closing(self.connect()) as conn:
+            if audit:
+                conn.execute(
+                    """
+                    INSERT INTO knowledge_audit_log
+                    (action, document_id, library_id, title, source_filename,
+                     chunk_count, actor_user_id, actor_name, actor_role,
+                     snapshot, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        audit.get("action", "delete"),
+                        document_id,
+                        audit.get("library_id", ""),
+                        audit.get("title", ""),
+                        audit.get("source_filename", ""),
+                        int(audit.get("chunk_count") or 0),
+                        audit.get("actor_user_id", ""),
+                        audit.get("actor_name", ""),
+                        audit.get("actor_role", ""),
+                        json.dumps(audit.get("snapshot") or {}, ensure_ascii=False),
+                        now_iso(),
+                    ),
+                )
             conn.execute(
                 "DELETE FROM knowledge_chunks WHERE document_id = ?", (document_id,)
             )
@@ -750,6 +856,27 @@ class WorkflowStore:
             )
             conn.commit()
             return cursor.rowcount > 0
+
+    def knowledge_audit_logs(self, document_id: str = "") -> List[Dict[str, Any]]:
+        with closing(self.connect()) as conn:
+            if document_id:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM knowledge_audit_log
+                    WHERE document_id = ? ORDER BY id DESC
+                    """,
+                    (document_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM knowledge_audit_log ORDER BY id DESC"
+                ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["snapshot"] = json.loads(item.get("snapshot") or "{}")
+            result.append(item)
+        return result
 
     def has_data_migration(self, migration_id: str) -> bool:
         with closing(self.connect()) as conn:

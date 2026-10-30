@@ -5,6 +5,7 @@
 - complete_json：要求 JSON 输出，用 Pydantic 校验，不合格自动重试。
 """
 import json
+import hashlib
 import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Protocol, Type, TypeVar, Union
@@ -76,8 +77,12 @@ class DeepSeekClient:
                 "input_tokens": result.input_tokens,
                 "output_tokens": result.output_tokens,
                 "latency_s": result.latency_s,
-                "messages": messages,
-                "output": result.text,
+                "input_sha256": hashlib.sha256(
+                    json.dumps(messages, ensure_ascii=False, sort_keys=True).encode("utf-8")
+                ).hexdigest(),
+                "output_sha256": hashlib.sha256(result.text.encode("utf-8")).hexdigest(),
+                "input_chars": sum(len(item.get("content", "")) for item in messages),
+                "output_chars": len(result.text),
             },
         )
         return result

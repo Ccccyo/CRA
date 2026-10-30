@@ -27,16 +27,23 @@ class HybridRetriever:
         self.vector = vector
         self.reranker = reranker
 
-    def candidates(self, query: str, n: int = 20) -> List[Hit]:
-        lists = [self.keyword.search(query, n)]
+    def candidates(
+        self,
+        query: str,
+        n: int = 20,
+        keep: Optional[Callable[[Chunk], bool]] = None,
+        where: Optional[dict] = None,
+    ) -> List[Hit]:
+        lists = [self.keyword.search(query, n, keep=keep)]
         if self.vector is not None:
-            lists.append(self.vector.search(query, n))
+            lists.append(self.vector.search(query, n, where=where))
         return rrf(lists)[:n]
 
     def search(self, query: str, k: int = 5, n_candidates: int = 20,
-               keep: Optional[Callable[[Chunk], bool]] = None) -> List[Hit]:
+               keep: Optional[Callable[[Chunk], bool]] = None,
+               where: Optional[dict] = None) -> List[Hit]:
         """keep：只保留符合条件的段落，例如写意见时历史申报只要本客户的。"""
-        cands = self.candidates(query, n_candidates)
+        cands = self.candidates(query, n_candidates, keep=keep, where=where)
         if keep is not None:
             cands = [h for h in cands if keep(h.chunk)]
         if self.reranker is not None:
@@ -46,11 +53,13 @@ class HybridRetriever:
 
 def build_retriever(chunks, use_vector: Optional[bool] = None, use_rerank: Optional[bool] = None) -> HybridRetriever:
     """默认：装了 ML 依赖就用向量 + 重排，没装就只用关键词。"""
+    from cra.config import get_settings
     from cra.retrieve import vector as vector_mod
 
+    settings = get_settings()
     available = vector_mod.is_available()
-    use_vector = available if use_vector is None else use_vector
-    use_rerank = available if use_rerank is None else use_rerank
+    use_vector = settings.rag_use_vector and available if use_vector is None else use_vector and available
+    use_rerank = settings.rag_use_rerank and available if use_rerank is None else use_rerank and available
 
     vec = rer = None
     if use_vector:

@@ -47,8 +47,10 @@ async function assignRole() {
       '  npx tsx scripts/assign-role.ts --email=user@example.com --role=viewer --expires-days=30'
     );
     console.log('\nAvailable roles:');
-    console.log('  - super_admin (full access)');
-    console.log('  - admin (most permissions)');
+    console.log(
+      '  - super_admin (system maintenance; CRA cases are read-only)'
+    );
+    console.log('  - admin (system maintenance; view all CRA cases read-only)');
     console.log('  - editor (content management)');
     console.log('  - viewer (read-only)');
     console.log('  - credit_analyst (CRA case work)');

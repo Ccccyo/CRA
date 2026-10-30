@@ -15,7 +15,7 @@
     "demo_accounts_title": "Demo accounts",
     "demo_accounts_description": "Choose an account to fill its email. You still enter the private password.",
     "demo_admin_title": "System administrator",
-    "demo_admin_permissions": "All CRA features plus user and permission management",
+    "demo_admin_permissions": "View all cases and maintain knowledge, users, and access (no case processing)",
     "demo_analyst_title": "Credit analyst",
     "demo_analyst_permissions": "Case intake, evidence work, draft editing, and policy RAG",
     "demo_reviewer_title": "Senior credit analyst",

@@ -3,6 +3,8 @@
 需要 requirements-ml.txt；没装时 is_available() 返回 False，系统自动退化为只用关键词检索。
 """
 import hashlib
+import json
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -14,10 +16,23 @@ COLLECTION = "cra_knowledge"
 
 
 def fingerprint(chunks: Sequence[Chunk]) -> str:
-    """段落内容的指纹：任何一段的编号或文字变了，指纹就变，索引需要重建。"""
+    """Corpus fingerprint, including metadata used for authorization filters."""
     h = hashlib.sha256()
     for c in chunks:
-        h.update(c.id.encode("utf-8") + b"\0" + c.text.encode("utf-8") + b"\0")
+        payload = {
+            "id": c.id,
+            "text": c.text,
+            "source": c.source,
+            "section": c.section,
+            "page": c.page,
+            "meta": c.meta,
+        }
+        h.update(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode(
+                "utf-8"
+            )
+            + b"\0"
+        )
     return h.hexdigest()
 
 
@@ -39,15 +54,23 @@ def _device() -> Optional[str]:
         return None
 
 
+@lru_cache(maxsize=4)
+def embedding_model(model_name: str, device: Optional[str]):
+    """Load each embedding model once per API process."""
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(model_name, device=device)
+
+
 class VectorIndex:
     def __init__(self, index_dir: Optional[Path] = None, model_name: Optional[str] = None,
                  collection: str = COLLECTION, model=None):
         import chromadb
-        from sentence_transformers import SentenceTransformer
-
         settings = get_settings()
-        self._model = model or SentenceTransformer(model_name or settings.embed_model, device=_device())
+        resolved_model = model_name or settings.embed_model
+        self._model = model or embedding_model(resolved_model, _device())
         self._dir = Path(index_dir or settings.index_dir / "chroma")
+        self._dir.mkdir(parents=True, exist_ok=True)
         client = chromadb.PersistentClient(path=str(self._dir))
         self._col = client.get_or_create_collection(collection, metadata={"hnsw:space": "cosine"})
         self._fp_file = self._dir / f"fingerprint_{collection}.txt"
@@ -61,20 +84,61 @@ class VectorIndex:
     def _embed(self, texts: Sequence[str]) -> List[List[float]]:
         return self._model.encode(list(texts), normalize_embeddings=True, batch_size=16).tolist()
 
-    def build(self, chunks: Sequence[Chunk], batch: int = 256) -> None:
-        """全量重建：先清空再写入，避免旧段落残留。标签（meta）一起存，检索时可以按公司、年份过滤。"""
-        existing = self._col.get()["ids"]
-        if existing:
-            self._col.delete(ids=existing)
-        for i in range(0, len(chunks), batch):  # 分批写入，Chroma 单次写入有上限
-            part = chunks[i:i + batch]
-            self._col.add(
+    @staticmethod
+    def _content_hash(chunk: Chunk) -> str:
+        payload = {
+            "text": chunk.text,
+            "source": chunk.source,
+            "section": chunk.section,
+            "page": chunk.page,
+            "meta": chunk.meta,
+        }
+        return hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+
+    def sync(self, chunks: Sequence[Chunk], batch: int = 256) -> None:
+        """Incrementally upsert changed chunks and remove deleted chunks."""
+        existing = self._col.get(include=["metadatas"])
+        existing_hashes = {
+            chunk_id: (metadata or {}).get("content_hash", "")
+            for chunk_id, metadata in zip(
+                existing.get("ids") or [], existing.get("metadatas") or []
+            )
+        }
+        desired = {chunk.id: chunk for chunk in chunks}
+        removed = sorted(set(existing_hashes) - set(desired))
+        if removed:
+            self._col.delete(ids=removed)
+        changed = [
+            chunk
+            for chunk in chunks
+            if existing_hashes.get(chunk.id) != self._content_hash(chunk)
+        ]
+        for i in range(0, len(changed), batch):
+            part = changed[i:i + batch]
+            self._col.upsert(
                 ids=[c.id for c in part],
                 embeddings=self._embed([c.text for c in part]),
                 documents=[c.text for c in part],
-                metadatas=[{"source": c.source, "section": c.section, "page": c.page or 0, **c.meta} for c in part],
+                metadatas=[
+                    {
+                        "source": c.source,
+                        "section": c.section,
+                        "page": c.page or 0,
+                        "content_hash": self._content_hash(c),
+                        **c.meta,
+                    }
+                    for c in part
+                ],
             )
         self._fp_file.write_text(fingerprint(chunks))
+
+    def build(self, chunks: Sequence[Chunk], batch: int = 256) -> None:
+        """Backward-compatible alias; updates only changed chunks."""
+        self.sync(chunks, batch=batch)
 
     def search(self, query: str, k: int = 20, where: Optional[dict] = None) -> List[Hit]:
         """where：按标签过滤，如 {"ticker": "DOW"} 只查这家公司。"""

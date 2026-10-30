@@ -5,8 +5,8 @@ export const stageLabels: Record<string, string> = {
   resolve_entity: '核对企业主体',
   financial_evidence: '抽取财务证据',
   financial_signoff: '签署财务证据',
-  retrieve_context: '检索规则与历史',
-  risk_signoff: '风险评测与意见',
+  retrieve_context: '准备评审依据',
+  risk_signoff: '风险意见',
   write_workbook: '生成 Excel 版本',
   external_score: '外部评分',
   final_signoff: '最终复核',
@@ -15,7 +15,7 @@ export const stageLabels: Record<string, string> = {
 
 export const statusLabels: Record<WorkflowStatus, string> = {
   ready: '待开始',
-  running: 'Agent 处理中',
+  running: '系统处理中',
   awaiting_human: '等待人工',
   blocked: '已阻断',
   completed: '已完成',
@@ -46,4 +46,3 @@ export function dateTime(value?: string) {
     minute: '2-digit',
   }).format(new Date(value));
 }
-

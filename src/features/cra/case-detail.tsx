@@ -2,8 +2,10 @@
 
 import {
   ChangeEvent,
+  CSSProperties,
   DragEvent,
   FormEvent,
+  PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -23,9 +25,11 @@ import {
   IconFileSpreadsheet,
   IconFileText,
   IconFlask,
+  IconGripVertical,
   IconHistory,
   IconLoader2,
   IconLock,
+  IconPencil,
   IconPlayerPlay,
   IconRefresh,
   IconRobot,
@@ -55,7 +59,6 @@ import type { CraCase, HumanTask, StageSnapshot } from './types';
 const visibleStages = [
   'resolve_entity',
   'financial_evidence',
-  'retrieve_context',
   'risk_signoff',
   'write_workbook',
   'final_signoff',
@@ -64,14 +67,14 @@ const visibleStages = [
 const stageAliases: Record<string, string[]> = {
   resolve_entity: ['resolve_entity'],
   financial_evidence: ['financial_evidence', 'financial_signoff'],
-  retrieve_context: ['retrieve_context'],
-  risk_signoff: ['risk_signoff'],
+  risk_signoff: ['retrieve_context', 'risk_signoff'],
   write_workbook: ['write_workbook'],
   final_signoff: ['final_signoff', 'completed'],
 };
 
 function visibleStage(stage: string) {
   if (stage === 'financial_signoff') return 'financial_evidence';
+  if (stage === 'retrieve_context') return 'risk_signoff';
   if (stage === 'completed' || stage === 'external_score') {
     return 'final_signoff';
   }
@@ -140,12 +143,148 @@ const financialLabels: Record<string, string> = {
   capex: '资本性支出',
 };
 
+type ChatSource = {
+  id: string;
+  citation: string;
+  text?: string;
+};
+
 type ChatMessage = {
   id: string;
   role: 'user' | 'assistant';
   text: string;
-  sources?: string[];
+  sources?: Array<ChatSource | string>;
 };
+
+const chatSourceCopy: Record<string, { title: string; description: string }> = {
+  案件概况: {
+    title: '案件概况',
+    description: '客户、BP、申请额度与业务基本信息。',
+  },
+  'Agent 状态': {
+    title: '当前流程状态',
+    description: '当前任务、完成进度、阻断原因与下一步。',
+  },
+  流程状态: {
+    title: '当前流程状态',
+    description: '当前任务、完成进度、阻断原因与下一步。',
+  },
+  案件备注: {
+    title: '案件处理记录',
+    description: '已确认的主体、财务证据、风险意见与人工处理记录。',
+  },
+  案件与客户: {
+    title: '案件与客户',
+    description: '客户主体、申请额度、所属地与业务信息。',
+  },
+  当期材料索引: {
+    title: '当期案件材料',
+    description: '本次评审已登记的财报与交接材料。',
+  },
+  已确认企业主体: {
+    title: '已确认企业主体',
+    description: '经分析师核对后确认的企业主体信息。',
+  },
+  财务证据: {
+    title: '财务证据',
+    description: '财报来源、抽取字段、数值、页码与原文证据。',
+  },
+  风险意见: {
+    title: '风险意见',
+    description: '已起草或签署的企业概况、定性判断与授信意见。',
+  },
+  人工处理记录: {
+    title: '人工确认与签署记录',
+    description: '人工确认、修改、签署与复核的留痕。',
+  },
+};
+
+function normalizeChatSource(
+  source: ChatSource | string,
+  index: number
+): ChatSource {
+  return typeof source === 'string'
+    ? { id: `S${index + 1}`, citation: source, text: '' }
+    : source;
+}
+
+function chatSourcePresentation(source: ChatSource) {
+  const citationParts = source.citation.split(/\s*·\s*/);
+  const rawScope = citationParts.length > 1 ? citationParts[0] : '知识库';
+  const rawTitle = citationParts.at(-1)?.trim() || '参考材料';
+  const known = chatSourceCopy[rawTitle];
+  const scope =
+    rawScope === '本案'
+      ? '本案材料'
+      : rawScope === '制度'
+        ? '公司制度'
+        : rawScope === '历史申报'
+          ? '历史案例'
+          : rawScope;
+  const readableExcerpt = (source.text || '')
+    .replace(/^#+\s*[^\n]+\n+/, '')
+    .replace(/[{}\[\]"]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return {
+    scope,
+    title: known?.title || rawTitle,
+    description:
+      known?.description || readableExcerpt || '用于支持本次回答的相关内容。',
+  };
+}
+
+function displayCitationMarkers(text: string, sources: RiskSource[]) {
+  const sourceOrder = new Map(
+    sources.map((source, index) => [source.id, index + 1])
+  );
+  return text.replace(/\[(S\d+)\]/g, (marker, sourceId: string) => {
+    const order = sourceOrder.get(sourceId);
+    return order ? `[依据 ${order}]` : marker;
+  });
+}
+
+function storeCitationMarkers(text: string, sources: RiskSource[]) {
+  return text.replace(/\[依据\s*(\d+)\]/g, (marker, rawOrder: string) => {
+    const source = sources[Number(rawOrder) - 1];
+    return source ? `[${source.id}]` : marker;
+  });
+}
+
+function ChatAnswerText({
+  text,
+  sources,
+}: {
+  text: string;
+  sources: Array<ChatSource | string>;
+}) {
+  const normalized = sources.map(normalizeChatSource);
+  const sourceOrder = new Map(
+    normalized.map((source, index) => [source.id, index + 1])
+  );
+  return (
+    <p className="whitespace-pre-wrap">
+      {text.split(/(\[S\d+\])/g).map((part, index) => {
+        const match = part.match(/^\[(S\d+)\]$/);
+        if (!match) return part;
+        const order = sourceOrder.get(match[1]);
+        if (!order) return part;
+        const source = normalized[order - 1];
+        const presentation = chatSourcePresentation(source);
+        return (
+          <span
+            key={`${part}-${index}`}
+            title={`依据 ${order}：${presentation.title}`}
+            aria-label={`依据 ${order}：${presentation.title}`}
+            className="mx-0.5 inline-flex translate-y-[-1px] items-center rounded bg-blue-50 px-1.5 py-0.5 text-[10px] leading-none font-semibold whitespace-nowrap text-blue-700"
+          >
+            依据 {order}
+          </span>
+        );
+      })}
+    </p>
+  );
+}
 
 type Candidate = {
   entity_id: string;
@@ -267,6 +406,7 @@ function EntityReview({
   selectedId,
   onSelect,
   onConfirm,
+  readOnly = false,
 }: {
   item: CraCase;
   task: HumanTask;
@@ -274,6 +414,7 @@ function EntityReview({
   selectedId: string;
   onSelect: (id: string) => void;
   onConfirm: () => void;
+  readOnly?: boolean;
 }) {
   const candidates = (task.payload.candidates ||
     item.notes.entity_candidates ||
@@ -283,7 +424,7 @@ function EntityReview({
       <PanelHeader
         eyebrow="需要你的判断"
         title="确认企业主体"
-        description="Agent 只做候选排序，不会自动合并。请同时核对 Excel 原始客户、SAP BP 与候选企业资料。"
+        description="系统仅整理候选顺序，不会自动合并。请同时核对 Excel 原始客户、SAP BP 与候选企业资料。"
       />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -328,8 +469,8 @@ function EntityReview({
             {candidates.map((candidate) => (
               <tr
                 key={candidate.entity_id}
-                onClick={() => onSelect(candidate.entity_id)}
-                className={`cursor-pointer transition-colors ${selectedId === candidate.entity_id ? 'bg-blue-50/80' : 'bg-white hover:bg-slate-50'}`}
+                onClick={() => !readOnly && onSelect(candidate.entity_id)}
+                className={`transition-colors ${readOnly ? 'cursor-default' : 'cursor-pointer'} ${selectedId === candidate.entity_id ? 'bg-blue-50/80' : 'bg-white hover:bg-slate-50'}`}
               >
                 <td className="px-4 py-4">
                   <input
@@ -337,6 +478,7 @@ function EntityReview({
                     name="entity"
                     checked={selectedId === candidate.entity_id}
                     onChange={() => onSelect(candidate.entity_id)}
+                    disabled={readOnly}
                     aria-label={`选择 ${candidate.name}`}
                     className="accent-blue-700"
                   />
@@ -380,7 +522,7 @@ function EntityReview({
                   colSpan={5}
                   className="px-4 py-10 text-center text-slate-500"
                 >
-                  尚未找到候选主体，请让 Agent 重新检索。
+                  尚未找到候选主体，请重新执行检索。
                 </td>
               </tr>
             )}
@@ -396,14 +538,20 @@ function EntityReview({
           recovery="请确认案件已成功导入原始 Excel，或刷新案件后重试。"
           className="rounded-xl bg-white"
         />
-        <Button
-          onClick={onConfirm}
-          disabled={acting || !selectedId}
-          className="rounded-xl bg-blue-700 hover:bg-blue-800"
-        >
-          {acting ? <IconLoader2 className="animate-spin" /> : <IconCheck />}{' '}
-          确认所选主体
-        </Button>
+        {readOnly ? (
+          <p className="text-xs text-amber-800">
+            等待有主体确认权限的经办人处理。
+          </p>
+        ) : (
+          <Button
+            onClick={onConfirm}
+            disabled={acting || !selectedId}
+            className="rounded-xl bg-blue-700 hover:bg-blue-800"
+          >
+            {acting ? <IconLoader2 className="animate-spin" /> : <IconCheck />}{' '}
+            确认所选主体
+          </Button>
+        )}
       </div>
     </section>
   );
@@ -413,13 +561,16 @@ function FinancialReview({
   item,
   acting,
   onConfirm,
+  onUpload,
   readOnly = false,
 }: {
   item: CraCase;
   acting: boolean;
   onConfirm: () => void;
+  onUpload?: (file: File) => Promise<boolean>;
   readOnly?: boolean;
 }) {
+  const replacementInputRef = useRef<HTMLInputElement>(null);
   const values = (item.notes.financial_values || []) as FinancialValue[];
   const source = item.notes.financial_source as
     | {
@@ -436,7 +587,7 @@ function FinancialReview({
       <PanelHeader
         eyebrow="需要你的判断"
         title="签署财务证据"
-        description="核对 Agent 抽取出的数值、单位、页码和原文。表格是本步骤的交付结果，不确认就不会进入风险分析。"
+        description="核对当期财报中抽取的数值、单位、页码和原文。如果来源文件不对，请在签署前替换财报并重新抽取。"
       />
       {source?.type === 'demo' && (
         <div className="mb-4 flex gap-3 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900 ring-1 ring-amber-200">
@@ -574,13 +725,39 @@ function FinancialReview({
         </table>
       </div>
       <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <DownloadButton
-          path={`/cases/${item.case_id}/financial-evidence.csv`}
-          filename={`${item.case_id}_financial_evidence.csv`}
-          label="下载抽取结果 CSV"
-          recovery="请先完成财务抽取与校验，再下载证据 CSV。"
-          className="rounded-xl bg-white"
-        />
+        <div className="flex flex-wrap gap-2">
+          <DownloadButton
+            path={`/cases/${item.case_id}/financial-evidence.csv`}
+            filename={`${item.case_id}_financial_evidence.csv`}
+            label="下载抽取结果 CSV"
+            recovery="请先完成财务抽取与校验，再下载证据 CSV。"
+            className="rounded-xl bg-white"
+          />
+          {!readOnly && onUpload && (
+            <>
+              <input
+                ref={replacementInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="sr-only"
+                onChange={(event) => {
+                  const next = event.target.files?.[0];
+                  if (next) void onUpload(next);
+                  event.target.value = '';
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={acting}
+                onClick={() => replacementInputRef.current?.click()}
+                className="rounded-xl bg-white"
+              >
+                <IconUpload /> 替换财报并重新抽取
+              </Button>
+            </>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-slate-500">
             {values.length} / 21 个字段
@@ -623,12 +800,15 @@ function RiskReview({
   onConfirm: (opinion: Record<string, unknown>) => void;
 }) {
   const draft = (item.notes.risk_draft || {}) as RiskDraft;
-  const sources = (item.notes.risk_sources || []) as RiskSource[];
+  const sources = useMemo(
+    () => (item.notes.risk_sources || []) as RiskSource[],
+    [item.notes.risk_sources]
+  );
   const [companyDescription, setCompanyDescription] = useState(
-    String(draft.company_description || '')
+    displayCitationMarkers(String(draft.company_description || ''), sources)
   );
   const [riskComments, setRiskComments] = useState(
-    String(draft.risk_comments || '')
+    displayCitationMarkers(String(draft.risk_comments || ''), sources)
   );
   const [qualitative, setQualitative] = useState<
     Record<string, { choice: string; reason: string }>
@@ -637,8 +817,12 @@ function RiskReview({
   /* The server revision is authoritative after save and regeneration. */
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    setCompanyDescription(String(draft.company_description || ''));
-    setRiskComments(String(draft.risk_comments || ''));
+    setCompanyDescription(
+      displayCitationMarkers(String(draft.company_description || ''), sources)
+    );
+    setRiskComments(
+      displayCitationMarkers(String(draft.risk_comments || ''), sources)
+    );
     setQualitative(draft.qualitative || {});
   }, [
     draft.company_description,
@@ -646,18 +830,24 @@ function RiskReview({
     draft.risk_comments,
     draft.updated_at,
     item.case_id,
+    sources,
   ]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const opinion = {
-    company_description: companyDescription,
-    risk_comments: riskComments,
+    company_description: storeCitationMarkers(companyDescription, sources),
+    risk_comments: storeCitationMarkers(riskComments, sources),
     stance: draft.stance || '',
     qualitative,
   };
   const dirty =
-    companyDescription !== String(draft.company_description || '') ||
-    riskComments !== String(draft.risk_comments || '') ||
+    companyDescription !==
+      displayCitationMarkers(
+        String(draft.company_description || ''),
+        sources
+      ) ||
+    riskComments !==
+      displayCitationMarkers(String(draft.risk_comments || ''), sources) ||
     JSON.stringify(qualitative) !== JSON.stringify(draft.qualitative || {});
   const complete =
     companyDescription.trim() &&
@@ -667,143 +857,168 @@ function RiskReview({
     <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:p-6">
       <PanelHeader
         eyebrow={signable ? '需要你的判断' : '案件核心产物'}
-        title="风险评测与意见"
-        description="Agent 根据已签署的财务证据和当前可见 RAG 材料起草。分析师可修改并保存；最终综合分和 Risk Category 仍由 Excel 宏 / SAP 计算。"
+        title="风险意见"
+        description="请结合已签署的财务证据与评审依据复核草稿。定性项会回填 Excel，综合分与 Risk Category 仍由原宏 / SAP 计算。"
       />
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <article className="space-y-5 rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200 md:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
-            <div className="flex items-center gap-2 text-xs font-semibold text-slate-800">
-              <IconFileText size={17} className="text-blue-700" /> Agent
-              风险草稿
-            </div>
-            <div className="flex items-center gap-2 text-[10px] text-slate-500">
-              <span className="rounded-md bg-white px-2 py-1 ring-1 ring-slate-200">
-                {draft.draft_mode === 'llm'
-                  ? '模型起草'
-                  : draft.draft_mode === 'analyst_edited'
-                    ? '分析师已修改'
-                    : '规则型草稿'}
-              </span>
-              <span>
-                {draft.edited_by || 'Agent'} · {dateTime(draft.updated_at)}
-              </span>
-            </div>
-          </div>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+        <div className="flex items-center gap-2 text-xs text-slate-600">
+          <IconFileText size={16} className="text-blue-700" />
+          <span className="font-semibold text-slate-900">
+            {draft.draft_mode === 'analyst_edited'
+              ? '分析师已修改'
+              : '系统草稿'}
+          </span>
+          <span>·</span>
+          <span>
+            {draft.edited_by || '系统'} · {dateTime(draft.updated_at)}
+          </span>
+        </div>
+        <span
+          className={`rounded-md px-2 py-1 text-[10px] font-semibold ${complete ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}
+        >
+          {complete ? '已具备签署条件' : '尚有必填项未完成'}
+        </span>
+      </div>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <article className="min-w-0 divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
           {draft.generation_warning && (
-            <div className="rounded-lg bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-900 ring-1 ring-amber-200">
+            <div className="m-4 rounded-lg bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-900 ring-1 ring-amber-200">
               {draft.generation_warning}
             </div>
           )}
-          <div>
-            <label
-              htmlFor="company-description"
-              className="text-xs font-semibold text-slate-950"
-            >
-              企业介绍
-            </label>
+          <div className="p-4 md:p-5">
+            <div className="mb-3 flex items-baseline justify-between gap-3">
+              <label
+                htmlFor="company-description"
+                className="text-sm font-semibold text-slate-950"
+              >
+                企业概况
+              </label>
+              <span className="text-[10px] text-slate-400">
+                {companyDescription.length} 字
+              </span>
+            </div>
             <Textarea
               id="company-description"
               value={companyDescription}
               onChange={(event) => setCompanyDescription(event.target.value)}
               disabled={!editable || acting}
-              className="mt-2 min-h-24 resize-y bg-white text-sm leading-6 text-slate-800"
+              className="min-h-28 resize-y border-slate-300 bg-white text-sm leading-6 text-slate-800"
             />
           </div>
-          <div>
+          <div className="p-4 md:p-5">
             <div className="flex flex-wrap items-end justify-between gap-2">
               <div>
-                <h3 className="text-xs font-semibold text-slate-950">
-                  定性评分建议
+                <h3 className="text-sm font-semibold text-slate-950">
+                  定性判断
                 </h3>
                 <p className="mt-1 text-[11px] text-slate-500">
-                  选项会回填 Excel；综合分由原宏计算。
+                  逐项确认回填值，理由来自已核验材料。
                 </p>
               </div>
-              <span className="text-[10px] text-slate-500">4 项均需复核</span>
+              <span className="text-[10px] text-slate-500">
+                {
+                  Object.values(qualitative).filter((value) => value?.choice)
+                    .length
+                }{' '}
+                / 4 已确认
+              </span>
             </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="mt-4 divide-y divide-slate-200 rounded-lg border border-slate-200">
               {Object.entries(qualitativeOptions).map(([key, options]) => (
                 <div
                   key={key}
-                  className="rounded-lg bg-white p-3 ring-1 ring-slate-200"
+                  className="grid gap-3 p-3.5 md:grid-cols-[160px_minmax(0,1fr)] md:items-start"
                 >
                   <label
                     htmlFor={`qual-${key}`}
-                    className="text-[11px] font-semibold text-slate-700"
+                    className="pt-2 text-xs font-semibold text-slate-700"
                   >
                     {qualitativeLabels[key]}
                   </label>
-                  <select
-                    id={`qual-${key}`}
-                    value={qualitative[key]?.choice || ''}
-                    onChange={(event) =>
-                      setQualitative((current) => ({
-                        ...current,
-                        [key]: {
-                          choice: event.target.value,
-                          reason: current[key]?.reason || '',
-                        },
-                      }))
-                    }
-                    disabled={!editable || acting}
-                    className="mt-2 h-9 w-full rounded-md border border-slate-300 bg-white px-2.5 text-xs text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100"
-                  >
-                    <option value="">请选择</option>
-                    {options.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-2 min-h-8 text-[10px] leading-4 text-slate-500">
-                    {qualitative[key]?.reason || '尚无起草理由'}
-                  </p>
+                  <div>
+                    <select
+                      id={`qual-${key}`}
+                      value={qualitative[key]?.choice || ''}
+                      onChange={(event) =>
+                        setQualitative((current) => ({
+                          ...current,
+                          [key]: {
+                            choice: event.target.value,
+                            reason: current[key]?.reason || '',
+                          },
+                        }))
+                      }
+                      disabled={!editable || acting}
+                      className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-xs text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-100"
+                    >
+                      <option value="">请选择</option>
+                      {options.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1.5 text-[10px] leading-4 text-slate-500">
+                      {qualitative[key]?.reason
+                        ? displayCitationMarkers(
+                            qualitative[key].reason,
+                            sources
+                          )
+                        : '尚无已核验理由'}
+                    </p>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
-          <div>
-            <label
-              htmlFor="risk-comments"
-              className="text-xs font-semibold text-slate-950"
-            >
-              风险意见
-            </label>
+          <div className="p-4 md:p-5">
+            <div className="mb-3 flex items-baseline justify-between gap-3">
+              <label
+                htmlFor="risk-comments"
+                className="text-sm font-semibold text-slate-950"
+              >
+                授信风险意见
+              </label>
+              <span className="text-[10px] text-slate-400">
+                {riskComments.length} 字
+              </span>
+            </div>
             <Textarea
               id="risk-comments"
               value={riskComments}
               onChange={(event) => setRiskComments(event.target.value)}
               disabled={!editable || acting}
-              className="mt-2 min-h-64 resize-y bg-white text-sm leading-6 text-slate-800"
+              className="min-h-72 resize-y border-slate-300 bg-white text-sm leading-6 text-slate-800"
             />
             <p className="mt-2 text-[10px] text-slate-500">
-              必须覆盖偿债能力、杠杆、盈利能力、付款记录和国家风险；保留 [S#]
-              引用。
+              必须覆盖偿债能力、杠杆、盈利能力、付款记录和国家风险；“依据
+              1”等标记与右侧来源一一对应，保存时请保留。
             </p>
           </div>
         </article>
-        <aside className="rounded-xl bg-white p-4 ring-1 ring-slate-200">
+        <aside className="h-fit rounded-xl border border-slate-200 bg-slate-50 p-4 xl:sticky xl:top-20">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <IconDatabase size={17} className="text-blue-700" />
-              <h3 className="text-xs font-semibold text-slate-950">
-                RAG 引用库
-              </h3>
+              <h3 className="text-xs font-semibold text-slate-950">评审依据</h3>
             </div>
             <span className="text-[10px] text-slate-500">
               {sources.length} 条
             </span>
           </div>
-          <div className="max-h-[390px] space-y-2 overflow-y-auto pr-1">
-            {sources.map((source) => (
+          <p className="mb-3 text-[11px] leading-5 text-slate-500">
+            此处只显示本意见实际引用的材料；展开可查看原文片段。
+          </p>
+          <div className="max-h-[560px] space-y-2 overflow-y-auto pr-1">
+            {sources.map((source, index) => (
               <details
                 key={source.id}
-                className="group rounded-lg bg-slate-50 ring-1 ring-slate-200"
+                className="group rounded-lg bg-white ring-1 ring-slate-200"
               >
                 <summary className="flex cursor-pointer list-none items-start gap-2 px-3 py-3">
                   <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
-                    {source.id}
+                    依据 {index + 1}
                   </span>
                   <span className="min-w-0 flex-1 text-[11px] leading-4 font-medium text-slate-800">
                     {source.citation}
@@ -815,10 +1030,10 @@ function RiskReview({
                 </summary>
                 <div className="border-t border-slate-200 px-3 py-3">
                   <div className="mb-2 flex flex-wrap gap-1.5">
-                    <span className="rounded bg-white px-2 py-1 text-[10px] text-slate-600 ring-1 ring-slate-200">
+                    <span className="rounded bg-slate-50 px-2 py-1 text-[10px] text-slate-600 ring-1 ring-slate-200">
                       {source.source_type || 'policy'}
                     </span>
-                    <span className="inline-flex items-center gap-1 rounded bg-white px-2 py-1 text-[10px] text-slate-600 ring-1 ring-slate-200">
+                    <span className="inline-flex items-center gap-1 rounded bg-slate-50 px-2 py-1 text-[10px] text-slate-600 ring-1 ring-slate-200">
                       <IconLock size={11} />
                       {source.access_scope || '信用分析师'}
                     </span>
@@ -890,19 +1105,23 @@ function WorkbookReview({
   acting,
   onRun,
   onConfirm,
+  canApprove,
+  canRun = true,
 }: {
   item: CraCase;
   task?: HumanTask;
   acting: boolean;
   onRun: () => void;
   onConfirm: () => void;
+  canApprove: boolean;
+  canRun?: boolean;
 }) {
   const generated = Boolean(item.notes.export_path);
   if (!generated) {
     return (
       <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:p-6">
         <PanelHeader
-          eyebrow="Agent 下一步"
+          eyebrow="下一步"
           title="生成 CRA Excel 新版本"
           description="系统会复制本案原始交接包，写入已确认的数据并保存为新的案件版本；原文件不会被覆盖。"
         />
@@ -910,20 +1129,26 @@ function WorkbookReview({
           输出位置：案件档案 →
           交付文件。生成完成后，本区域会显示文件名、生成时间和下载按钮。
         </div>
-        <div className="mt-5 flex justify-end">
-          <Button
-            onClick={onRun}
-            disabled={acting}
-            className="rounded-xl bg-blue-700 hover:bg-blue-800"
-          >
-            {acting ? (
-              <IconLoader2 className="animate-spin" />
-            ) : (
-              <IconFileSpreadsheet />
-            )}{' '}
-            生成 Excel 新版本
-          </Button>
-        </div>
+        {canRun ? (
+          <div className="mt-5 flex justify-end">
+            <Button
+              onClick={onRun}
+              disabled={acting}
+              className="rounded-xl bg-blue-700 hover:bg-blue-800"
+            >
+              {acting ? (
+                <IconLoader2 className="animate-spin" />
+              ) : (
+                <IconFileSpreadsheet />
+              )}{' '}
+              生成 Excel 新版本
+            </Button>
+          </div>
+        ) : (
+          <div className="mt-5 rounded-lg bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600 ring-1 ring-slate-200">
+            管理员为只读查看；请由案件经办人生成新的 Excel 版本。
+          </div>
+        )}
       </section>
     );
   }
@@ -961,7 +1186,7 @@ function WorkbookReview({
           className="shrink-0 rounded-xl bg-white text-emerald-800"
         />
       </div>
-      {task && (
+      {task && canApprove && (
         <div className="mt-5 flex justify-end">
           <Button
             onClick={onConfirm}
@@ -973,6 +1198,11 @@ function WorkbookReview({
           </Button>
         </div>
       )}
+      {task && !canApprove && (
+        <div className="mt-5 rounded-lg bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900 ring-1 ring-amber-200">
+          当前文件等待高级信用分析师完成独立最终复核。经办分析师不能关闭案件。
+        </div>
+      )}
     </section>
   );
 }
@@ -981,18 +1211,20 @@ function RunningStep({
   item,
   acting,
   onRun,
+  readOnly = false,
 }: {
   item: CraCase;
   acting: boolean;
   onRun: () => void;
+  readOnly?: boolean;
 }) {
   const descriptions: Record<string, string> = {
     resolve_entity:
-      'Agent 将根据名称、地址、国家与企业库做候选排序，然后交给你确认。',
+      '系统将根据名称、地址、国家与企业库整理候选主体，然后交给你确认。',
     financial_evidence:
-      'Agent 将读取当期财报，抽取 21 个财务字段，并保留页码与原文。',
+      '系统将读取当期财报，抽取 21 个财务字段，并保留页码与原文。',
     retrieve_context:
-      'Agent 将检索内部规则、历史案件与公开资料，生成带引用的风险意见草稿。',
+      '系统将检索内部规则、历史案件与公开资料，生成带引用的风险意见草稿。',
   };
   return (
     <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:p-6">
@@ -1001,23 +1233,29 @@ function RunningStep({
         title={item.workflow.current_task}
         description={
           descriptions[item.workflow.current_stage] ||
-          'Agent 将执行当前步骤，并在需要判断时暂停。'
+          '系统将执行当前步骤，并在需要判断时暂停。'
         }
       />
-      <div className="flex justify-end">
-        <Button
-          onClick={onRun}
-          disabled={acting}
-          className="rounded-xl bg-blue-700 hover:bg-blue-800"
-        >
-          {acting ? (
-            <IconLoader2 className="animate-spin" />
-          ) : (
-            <IconPlayerPlay />
-          )}{' '}
-          让 Agent 执行当前步骤
-        </Button>
-      </div>
+      {readOnly ? (
+        <div className="rounded-lg bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600 ring-1 ring-slate-200">
+          管理员为只读查看；当前步骤由案件经办人继续执行。
+        </div>
+      ) : (
+        <div className="flex justify-end">
+          <Button
+            onClick={onRun}
+            disabled={acting}
+            className="rounded-xl bg-blue-700 hover:bg-blue-800"
+          >
+            {acting ? (
+              <IconLoader2 className="animate-spin" />
+            ) : (
+              <IconPlayerPlay />
+            )}{' '}
+            执行当前步骤
+          </Button>
+        </div>
+      )}
     </section>
   );
 }
@@ -1028,12 +1266,14 @@ function BlockedFinancials({
   onUpload,
   onRun,
   onDemo,
+  readOnly = false,
 }: {
   item: CraCase;
   acting: boolean;
   onUpload: (file: File) => Promise<boolean>;
   onRun: () => void;
   onDemo: () => void;
+  readOnly?: boolean;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState('');
@@ -1067,7 +1307,7 @@ function BlockedFinancials({
         title="上传当期财务报告"
         description={
           item.workflow.blocker ||
-          '上传正式财报后，Agent 会定位报表页、抽取字段并交给你逐项签署。'
+          '上传正式财报后，系统会定位报表页、抽取字段并交给你逐项签署。'
         }
       />
       {activeBadCase && (
@@ -1091,144 +1331,166 @@ function BlockedFinancials({
           </div>
         </div>
       )}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
-        <div className="min-w-0">
-          {!file ? (
-            <label
-              onDragEnter={() => setDragging(true)}
-              onDragLeave={() => setDragging(false)}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event: DragEvent<HTMLLabelElement>) => {
-                event.preventDefault();
-                setDragging(false);
-                chooseFile(event.dataTransfer.files?.[0] || null);
-              }}
-              className={`group grid min-h-52 cursor-pointer place-items-center rounded-2xl border border-dashed p-6 text-center transition focus-within:ring-2 focus-within:ring-blue-600 ${
-                dragging
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-slate-300 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/50'
-              }`}
-            >
-              <input
-                type="file"
-                accept="application/pdf,.pdf"
-                className="sr-only"
-                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                  chooseFile(event.target.files?.[0] || null)
-                }
-              />
-              <div>
-                <span className="mx-auto grid size-12 place-items-center rounded-xl bg-white text-blue-700 shadow-sm ring-1 ring-slate-200 transition group-hover:-translate-y-0.5">
-                  <IconUpload size={22} />
-                </span>
-                <p className="mt-4 text-sm font-semibold text-slate-950">
-                  拖入财报，或点击选择文件
-                </p>
-                <p className="mt-2 text-xs leading-5 text-slate-500">
-                  PDF · 最大 20 MB · 建议使用带文字层的审计报告
-                </p>
-              </div>
-            </label>
-          ) : (
-            <div className="flex min-h-52 flex-col justify-between rounded-2xl bg-slate-50 p-5 ring-1 ring-slate-200">
-              <div className="flex min-w-0 items-start gap-3">
-                <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-red-50 text-red-700 ring-1 ring-red-100">
-                  <IconFileText size={22} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-slate-950">
-                    {file.name}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {(file.size / 1024 / 1024).toFixed(2)} MB · 待上传
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  aria-label="移除文件"
-                  disabled={acting}
-                  onClick={() => {
-                    setFile(null);
-                    setFileError('');
-                  }}
-                  className="grid size-9 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-white hover:text-slate-950 disabled:opacity-50"
-                >
-                  <IconX size={18} />
-                </button>
-              </div>
-              <div>
-                <p className="mb-3 text-xs leading-5 text-slate-500">
-                  上传后将自动抽取案件期间{' '}
-                  {String(item.new_year.period_end || '')} 的财务字段。
-                </p>
-                <Button
-                  type="button"
-                  onClick={() => void upload()}
-                  disabled={acting}
-                  className="h-11 w-full rounded-xl bg-blue-700 hover:bg-blue-800"
-                >
-                  {acting ? (
-                    <IconLoader2 className="animate-spin" />
-                  ) : (
-                    <IconUpload />
-                  )}
-                  {acting ? '正在解析财报…' : '上传并开始抽取'}
-                </Button>
-              </div>
-            </div>
-          )}
-          {fileError && (
-            <p role="alert" className="mt-3 text-xs font-medium text-red-600">
-              {fileError}
-            </p>
-          )}
-        </div>
-        <aside className="rounded-2xl bg-slate-50 p-5 ring-1 ring-slate-200">
-          <p className="text-xs font-semibold text-slate-900">上传后自动完成</p>
-          <ol className="mt-4 space-y-3 text-xs leading-5 text-slate-600">
-            <li className="flex gap-2">
-              <span className="font-semibold text-blue-700">1.</span>{' '}
-              定位三大财务报表页
-            </li>
-            <li className="flex gap-2">
-              <span className="font-semibold text-blue-700">2.</span>{' '}
-              抽取数值、单位与原文
-            </li>
-            <li className="flex gap-2">
-              <span className="font-semibold text-blue-700">3.</span>{' '}
-              校验后进入人工签署
-            </li>
-          </ol>
-        </aside>
-      </div>
-      <div className="mt-5 flex flex-col gap-3 rounded-xl bg-blue-950 p-4 text-white sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          {item.workflow.status === 'blocked' ? (
-            <IconFlask size={20} className="mt-0.5 shrink-0 text-blue-300" />
-          ) : (
-            <IconFileText size={20} className="mt-0.5 shrink-0 text-blue-300" />
-          )}
-          <p className="text-xs leading-5 text-blue-100">
-            {item.workflow.status === 'blocked'
-              ? '如果暂时没有正式财报，可使用上期 SAP 数据生成明确标注的演示抽取。'
-              : '案件已经登记了财报材料时，可直接让 Agent 读取；上传新文件会替换本次抽取来源。'}
+      {readOnly ? (
+        <div className="rounded-xl bg-slate-50 px-4 py-4 text-sm leading-6 text-slate-700 ring-1 ring-slate-200">
+          <p className="font-semibold text-slate-900">管理员只读查看</p>
+          <p className="mt-1 text-xs text-slate-600">
+            当前案件正在等待经办分析师上传正式财报。管理员不能上传材料、使用演示数据或推进流程。
           </p>
         </div>
-        <Button
-          onClick={item.workflow.status === 'blocked' ? onDemo : onRun}
-          disabled={acting}
-          className="shrink-0 rounded-xl bg-white text-blue-950 hover:bg-blue-50"
-        >
-          {acting ? (
-            <IconLoader2 className="animate-spin" />
-          ) : (
-            <IconPlayerPlay />
-          )}{' '}
-          {item.workflow.status === 'blocked'
-            ? '使用演示数据继续'
-            : '读取已有材料'}
-        </Button>
-      </div>
+      ) : (
+        <>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="min-w-0">
+              {!file ? (
+                <label
+                  onDragEnter={() => setDragging(true)}
+                  onDragLeave={() => setDragging(false)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event: DragEvent<HTMLLabelElement>) => {
+                    event.preventDefault();
+                    setDragging(false);
+                    chooseFile(event.dataTransfer.files?.[0] || null);
+                  }}
+                  className={`group grid min-h-52 cursor-pointer place-items-center rounded-2xl border border-dashed p-6 text-center transition focus-within:ring-2 focus-within:ring-blue-600 ${
+                    dragging
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-slate-300 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/50'
+                  }`}
+                >
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    className="sr-only"
+                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                      chooseFile(event.target.files?.[0] || null)
+                    }
+                  />
+                  <div>
+                    <span className="mx-auto grid size-12 place-items-center rounded-xl bg-white text-blue-700 shadow-sm ring-1 ring-slate-200 transition group-hover:-translate-y-0.5">
+                      <IconUpload size={22} />
+                    </span>
+                    <p className="mt-4 text-sm font-semibold text-slate-950">
+                      拖入财报，或点击选择文件
+                    </p>
+                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                      PDF · 最大 20 MB · 建议使用带文字层的审计报告
+                    </p>
+                  </div>
+                </label>
+              ) : (
+                <div className="flex min-h-52 flex-col justify-between rounded-2xl bg-slate-50 p-5 ring-1 ring-slate-200">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-red-50 text-red-700 ring-1 ring-red-100">
+                      <IconFileText size={22} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-950">
+                        {file.name}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {(file.size / 1024 / 1024).toFixed(2)} MB · 待上传
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="移除文件"
+                      disabled={acting}
+                      onClick={() => {
+                        setFile(null);
+                        setFileError('');
+                      }}
+                      className="grid size-9 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-white hover:text-slate-950 disabled:opacity-50"
+                    >
+                      <IconX size={18} />
+                    </button>
+                  </div>
+                  <div>
+                    <p className="mb-3 text-xs leading-5 text-slate-500">
+                      上传后将自动抽取案件期间{' '}
+                      {String(item.new_year.period_end || '')} 的财务字段。
+                    </p>
+                    <Button
+                      type="button"
+                      onClick={() => void upload()}
+                      disabled={acting}
+                      className="h-11 w-full rounded-xl bg-blue-700 hover:bg-blue-800"
+                    >
+                      {acting ? (
+                        <IconLoader2 className="animate-spin" />
+                      ) : (
+                        <IconUpload />
+                      )}
+                      {acting ? '正在解析财报…' : '上传并开始抽取'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {fileError && (
+                <p
+                  role="alert"
+                  className="mt-3 text-xs font-medium text-red-600"
+                >
+                  {fileError}
+                </p>
+              )}
+            </div>
+            <aside className="rounded-2xl bg-slate-50 p-5 ring-1 ring-slate-200">
+              <p className="text-xs font-semibold text-slate-900">
+                上传后自动完成
+              </p>
+              <ol className="mt-4 space-y-3 text-xs leading-5 text-slate-600">
+                <li className="flex gap-2">
+                  <span className="font-semibold text-blue-700">1.</span>{' '}
+                  定位三大财务报表页
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-semibold text-blue-700">2.</span>{' '}
+                  抽取数值、单位与原文
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-semibold text-blue-700">3.</span>{' '}
+                  校验后进入人工签署
+                </li>
+              </ol>
+            </aside>
+          </div>
+          <div className="mt-5 flex flex-col gap-3 rounded-xl bg-blue-950 p-4 text-white sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              {item.workflow.status === 'blocked' ? (
+                <IconFlask
+                  size={20}
+                  className="mt-0.5 shrink-0 text-blue-300"
+                />
+              ) : (
+                <IconFileText
+                  size={20}
+                  className="mt-0.5 shrink-0 text-blue-300"
+                />
+              )}
+              <p className="text-xs leading-5 text-blue-100">
+                {item.workflow.status === 'blocked'
+                  ? '如果暂时没有正式财报，可使用上期 SAP 数据生成明确标注的演示抽取。'
+                  : '案件已经登记了财报材料时，可直接读取；上传新文件会替换本次抽取来源。'}
+              </p>
+            </div>
+            <Button
+              onClick={item.workflow.status === 'blocked' ? onDemo : onRun}
+              disabled={acting}
+              className="shrink-0 rounded-xl bg-white text-blue-950 hover:bg-blue-50"
+            >
+              {acting ? (
+                <IconLoader2 className="animate-spin" />
+              ) : (
+                <IconPlayerPlay />
+              )}{' '}
+              {item.workflow.status === 'blocked'
+                ? '使用演示数据继续'
+                : '读取已有材料'}
+            </Button>
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -1373,6 +1635,8 @@ function CompletedStageView({
         acting={false}
         onRun={() => undefined}
         onConfirm={() => undefined}
+        canApprove={false}
+        canRun={false}
       />
     );
   }
@@ -1428,11 +1692,11 @@ function CompletedStageView({
           </span>
         </div>
         <div className="divide-border border-border mt-5 divide-y border-y">
-          {sources.map((source) => (
+          {sources.map((source, index) => (
             <div key={source.id} className="py-4">
               <div className="flex items-start gap-3">
                 <span className="bg-primary/10 text-primary rounded-md px-2 py-1 text-xs font-semibold">
-                  {source.id}
+                  依据 {index + 1}
                 </span>
                 <div className="min-w-0">
                   <p className="text-foreground text-sm font-semibold break-words">
@@ -1515,11 +1779,98 @@ function AuditCaseFile({ item }: { item: CraCase }) {
 }
 
 function CaseChat({ item }: { item: CraCase }) {
+  const [open, setOpen] = useState(false);
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatting, setChatting] = useState(false);
+  const [draggingPanel, setDraggingPanel] = useState(false);
+  const [panelPosition, setPanelPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const dragOriginRef = useRef<{
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
   const wf = item.workflow;
+
+  const clampPanelPosition = useCallback((left: number, top: number) => {
+    const panel = panelRef.current;
+    if (!panel) return { left, top };
+    const rect = panel.getBoundingClientRect();
+    const workspaceLeft = window.innerWidth >= 1024 ? 272 : 12;
+    const minTop = 76;
+    const maxLeft = Math.max(
+      workspaceLeft,
+      window.innerWidth - rect.width - 12
+    );
+    const maxTop = Math.max(minTop, window.innerHeight - rect.height - 12);
+    return {
+      left: Math.min(Math.max(left, workspaceLeft), maxLeft),
+      top: Math.min(Math.max(top, minTop), maxTop),
+    };
+  }, []);
+
+  const movePanelBy = useCallback(
+    (deltaX: number, deltaY: number) => {
+      const panel = panelRef.current;
+      if (!panel || window.innerWidth < 768) return;
+      const rect = panel.getBoundingClientRect();
+      setPanelPosition(
+        clampPanelPosition(rect.left + deltaX, rect.top + deltaY)
+      );
+    },
+    [clampPanelPosition]
+  );
+
+  const startPanelDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (window.innerWidth < 768 || !panelRef.current) return;
+    const rect = panelRef.current.getBoundingClientRect();
+    dragOriginRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDraggingPanel(true);
+  };
+
+  const movePanel = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const dragOrigin = dragOriginRef.current;
+    if (!dragOrigin || dragOrigin.pointerId !== event.pointerId) return;
+    setPanelPosition(
+      clampPanelPosition(
+        event.clientX - dragOrigin.offsetX,
+        event.clientY - dragOrigin.offsetY
+      )
+    );
+  };
+
+  const stopPanelDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (dragOriginRef.current?.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    dragOriginRef.current = null;
+    setDraggingPanel(false);
+  };
+
+  useEffect(() => {
+    const keepPanelInWorkspace = () => {
+      if (window.innerWidth < 768) {
+        setPanelPosition(null);
+        return;
+      }
+      setPanelPosition((current) =>
+        current ? clampPanelPosition(current.left, current.top) : current
+      );
+    };
+    window.addEventListener('resize', keepPanelInWorkspace);
+    return () => window.removeEventListener('resize', keepPanelInWorkspace);
+  }, [clampPanelPosition]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
@@ -1544,9 +1895,19 @@ function CaseChat({ item }: { item: CraCase }) {
     setChatting(true);
     try {
       const result = await craApi.chat(item.case_id, prompt, history);
-      const sourceList = Array.isArray(result.sources)
-        ? result.sources.map((source) => source.citation || '').filter(Boolean)
-        : Object.keys(result.sources || {});
+      const sourceList: ChatSource[] = Array.isArray(result.sources)
+        ? result.sources
+            .map((source, index) => ({
+              id: source.id || `S${index + 1}`,
+              citation: source.citation || `来源 ${index + 1}`,
+              text: source.text,
+            }))
+            .filter((source) => source.citation)
+        : Object.entries(result.sources || {}).map(([id, text]) => ({
+            id,
+            citation: id,
+            text,
+          }));
       setMessages((current) => [
         ...current,
         {
@@ -1574,147 +1935,262 @@ function CaseChat({ item }: { item: CraCase }) {
   };
 
   return (
-    <aside className="h-[620px] min-h-0 xl:sticky xl:top-5 xl:h-[calc(100vh-2.5rem)]">
-      <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl bg-white shadow-[0_18px_50px_-32px_rgba(15,23,42,.45)] ring-1 ring-slate-200">
-        <header className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-4">
-          <div className="flex items-center gap-3">
-            <span className="grid size-9 place-items-center rounded-xl bg-blue-50 text-blue-700">
-              <IconRobot size={19} />
-            </span>
-            <div>
-              <h2 className="text-sm font-semibold text-slate-950">案件助手</h2>
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                始终基于本案材料与已授权 RAG
-              </p>
-            </div>
-          </div>
-          <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
-            <span className="size-1.5 rounded-full bg-emerald-500" />
-            在线
-          </span>
-        </header>
-        <div
-          aria-live="polite"
-          className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50/70 px-4 py-5 [scrollbar-color:#cbd5e1_transparent] [scrollbar-width:thin]"
+    <>
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-expanded="false"
+          aria-controls="case-assistant-panel"
+          className="fixed right-4 bottom-4 z-40 flex h-14 items-center gap-3 rounded-2xl bg-blue-700 pr-4 pl-2.5 text-left text-white shadow-[0_18px_40px_-14px_rgba(29,78,216,.7)] transition duration-200 hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-[0_20px_44px_-14px_rgba(29,78,216,.78)] focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 focus-visible:outline-none md:right-7 md:bottom-7"
+          title="打开 CRA 案件问答助手"
         >
-          <div className="flex items-start gap-2.5">
-            <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-blue-700 text-white">
-              <IconRobot size={15} />
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-white/15 ring-1 ring-white/20">
+            <IconRobot size={21} stroke={1.8} />
+          </span>
+          <span className="min-w-0 leading-none">
+            <strong className="block text-sm font-semibold tracking-[-0.01em]">
+              CRA Bot
+            </strong>
+            <span className="mt-1 flex items-center gap-1.5 text-[10px] text-blue-100">
+              <span className="size-1.5 rounded-full bg-emerald-300" />
+              案件问答助手
             </span>
-            <div className="max-w-[86%] rounded-2xl rounded-tl-md bg-white px-3.5 py-3 text-xs leading-5 text-slate-700 ring-1 ring-slate-200">
-              {wf.status === 'blocked'
-                ? `当前流程因「${wf.blocker || '材料不完整'}」暂停。你可以问我阻断原因、已有证据或下一步。`
-                : `我正在跟进「${wf.current_task}」。你可以让我解释当前结果、证据或规则依据。`}
-            </div>
-          </div>
-          {messages.map((message) =>
-            message.role === 'user' ? (
-              <div key={message.id} className="flex justify-end">
-                <div className="max-w-[86%] rounded-2xl rounded-tr-md bg-blue-700 px-3.5 py-3 text-xs leading-5 text-white">
-                  <p className="whitespace-pre-wrap">{message.text}</p>
+          </span>
+        </button>
+      )}
+      {open && (
+        <aside
+          ref={panelRef}
+          id="case-assistant-panel"
+          style={panelPosition as CSSProperties | undefined}
+          className={`fixed inset-x-3 top-20 bottom-3 z-50 min-h-0 md:inset-auto md:h-[min(680px,calc(100vh-7rem))] md:w-[400px] ${panelPosition ? 'md:right-auto md:bottom-auto' : 'md:right-6 md:bottom-6'}`}
+        >
+          <section
+            className={`flex h-full min-h-0 flex-col overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200 transition-shadow duration-200 ${draggingPanel ? 'shadow-[0_34px_90px_-24px_rgba(15,23,42,.65)]' : 'shadow-[0_28px_80px_-24px_rgba(15,23,42,.55)]'}`}
+          >
+            <header className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-4">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <button
+                  type="button"
+                  onPointerDown={startPanelDrag}
+                  onPointerMove={movePanel}
+                  onPointerUp={stopPanelDrag}
+                  onPointerCancel={stopPanelDrag}
+                  onKeyDown={(event) => {
+                    const step = event.shiftKey ? 48 : 16;
+                    const movement: Record<string, [number, number]> = {
+                      ArrowLeft: [-step, 0],
+                      ArrowRight: [step, 0],
+                      ArrowUp: [0, -step],
+                      ArrowDown: [0, step],
+                    };
+                    if (movement[event.key]) {
+                      event.preventDefault();
+                      movePanelBy(...movement[event.key]);
+                    } else if (event.key === 'Escape') {
+                      setPanelPosition(null);
+                    }
+                  }}
+                  aria-label="移动问答助手；可拖动或使用方向键，Escape 复位"
+                  title="拖动移动问答助手"
+                  className={`hidden size-8 shrink-0 touch-none place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:outline-none md:grid ${draggingPanel ? 'cursor-grabbing bg-slate-100 text-slate-700' : 'cursor-grab'}`}
+                >
+                  <IconGripVertical size={17} />
+                </button>
+                <span className="grid size-9 place-items-center rounded-xl bg-blue-50 text-blue-700">
+                  <IconRobot size={19} />
+                </span>
+                <div className="min-w-0">
+                  <h2 className="text-sm font-semibold text-slate-950">
+                    CRA Bot
+                  </h2>
+                  <p className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-slate-500">
+                    <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
+                    案件问答助手 · 基于本案材料与知识库
+                  </p>
                 </div>
               </div>
-            ) : (
-              <div key={message.id} className="flex items-start gap-2.5">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="grid size-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:outline-none"
+                aria-label="关闭案件助手"
+              >
+                <IconX size={18} />
+              </button>
+            </header>
+            <div
+              aria-live="polite"
+              className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50/70 px-4 py-5 [scrollbar-color:#cbd5e1_transparent] [scrollbar-width:thin]"
+            >
+              <div className="flex items-start gap-2.5">
                 <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-blue-700 text-white">
                   <IconRobot size={15} />
                 </span>
                 <div className="max-w-[86%] rounded-2xl rounded-tl-md bg-white px-3.5 py-3 text-xs leading-5 text-slate-700 ring-1 ring-slate-200">
-                  <p className="whitespace-pre-wrap">{message.text}</p>
-                  {!!message.sources?.length && (
-                    <div className="mt-3 border-t border-slate-100 pt-2">
-                      <p className="mb-1.5 text-[10px] text-slate-400">
-                        回答依据
-                      </p>
-                      {message.sources.map((source) => (
-                        <p
-                          key={source}
-                          className="mt-1 text-[10px] leading-4 text-slate-500"
-                        >
-                          · {source}
-                        </p>
-                      ))}
-                    </div>
-                  )}
+                  {wf.status === 'blocked'
+                    ? `当前流程因「${wf.blocker || '材料不完整'}」暂停。你可以问我阻断原因、已有证据或下一步。`
+                    : `我正在跟进「${wf.current_task}」。你可以让我解释当前结果、证据或规则依据。`}
                 </div>
               </div>
-            )
-          )}
-          {chatting && (
-            <div className="flex items-start gap-2.5">
-              <span className="grid size-7 place-items-center rounded-lg bg-blue-700 text-white">
-                <IconRobot size={15} />
-              </span>
-              <div className="flex gap-1 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
-                {[0, 1, 2].map((dot) => (
-                  <span
-                    key={dot}
-                    className="size-1.5 animate-pulse rounded-full bg-slate-400"
-                    style={{ animationDelay: `${dot * 140}ms` }}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-        <div className="shrink-0 border-t border-slate-200 bg-white p-3">
-          {!messages.length && (
-            <div className="mb-3 flex gap-2 overflow-x-auto [scrollbar-width:none]">
-              {[
-                '为什么停在这里？',
-                '我需要确认什么？',
-                '用了哪些 RAG 资料？',
-              ].map((suggestion) => (
-                <button
-                  key={suggestion}
-                  type="button"
-                  onClick={() => setQuestion(suggestion)}
-                  className="shrink-0 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100"
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
-          )}
-          <form onSubmit={ask} className="flex items-end gap-2">
-            <Textarea
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              onKeyDown={(event) => {
-                if (
-                  event.key === 'Enter' &&
-                  !event.shiftKey &&
-                  !event.nativeEvent.isComposing
-                ) {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-              aria-label="输入案件问题"
-              placeholder="输入案件问题…"
-              className="max-h-28 min-h-11 resize-none !border-slate-300 !bg-white py-2.5 text-sm !text-slate-950 caret-blue-600 placeholder:!text-slate-400 focus-visible:!border-blue-500 focus-visible:!ring-blue-500/20"
-            />
-            <Button
-              type="submit"
-              size="icon"
-              disabled={chatting || !question.trim()}
-              aria-label="发送问题"
-              className="size-11 shrink-0 rounded-xl bg-blue-700 hover:bg-blue-800"
-            >
-              {chatting ? (
-                <IconLoader2 className="animate-spin" />
-              ) : (
-                <IconSend />
+              {messages.map((message) =>
+                message.role === 'user' ? (
+                  <div key={message.id} className="flex justify-end">
+                    <div className="max-w-[86%] rounded-2xl rounded-tr-md bg-blue-700 px-3.5 py-3 text-xs leading-5 text-white">
+                      <ChatAnswerText
+                        text={message.text}
+                        sources={message.sources || []}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div key={message.id} className="flex items-start gap-2.5">
+                    <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-blue-700 text-white">
+                      <IconRobot size={15} />
+                    </span>
+                    <div className="max-w-[86%] rounded-2xl rounded-tl-md bg-white px-3.5 py-3 text-xs leading-5 text-slate-700 ring-1 ring-slate-200">
+                      <p className="whitespace-pre-wrap">{message.text}</p>
+                      {!!message.sources?.length && (
+                        <details className="group mt-3 border-t border-slate-200 pt-2.5">
+                          <summary className="flex min-h-8 cursor-pointer list-none items-center gap-2 rounded-lg px-1 text-[11px] font-medium text-slate-600 transition-colors outline-none hover:text-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500/30 [&::-webkit-details-marker]:hidden">
+                            <IconShieldCheck
+                              size={15}
+                              className="shrink-0 text-emerald-600"
+                              aria-hidden="true"
+                            />
+                            <span>查看本次回答依据</span>
+                            <span className="font-normal text-slate-400">
+                              {message.sources.length} 条
+                            </span>
+                            <IconChevronDown
+                              size={14}
+                              className="ml-auto shrink-0 text-slate-400 transition-transform group-open:rotate-180"
+                              aria-hidden="true"
+                            />
+                          </summary>
+                          <ol
+                            className="mt-2 overflow-hidden rounded-lg border border-slate-200 bg-white"
+                            aria-label="本次回答依据"
+                          >
+                            <li className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-[10px] leading-4 text-slate-500">
+                              回答中的蓝色「依据 1」与下方同序号材料一一对应。
+                            </li>
+                            {message.sources.map((source, index) => {
+                              const evidence = normalizeChatSource(
+                                source,
+                                index
+                              );
+                              const presentation =
+                                chatSourcePresentation(evidence);
+                              return (
+                                <li
+                                  key={`${evidence.id}-${evidence.citation}-${index}`}
+                                  className="grid grid-cols-[1.75rem_minmax(0,1fr)] gap-2.5 border-b border-slate-200 px-3 py-3 last:border-b-0"
+                                >
+                                  <span className="grid size-6 place-items-center rounded-full bg-blue-50 text-[10px] font-semibold text-blue-700 tabular-nums">
+                                    {index + 1}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <div className="flex min-w-0 items-center gap-2">
+                                      <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500">
+                                        {presentation.scope}
+                                      </span>
+                                      <p className="truncate text-[11px] font-semibold text-slate-800">
+                                        {presentation.title}
+                                      </p>
+                                    </div>
+                                    <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">
+                                      {presentation.description}
+                                    </p>
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ol>
+                        </details>
+                      )}
+                    </div>
+                  </div>
+                )
               )}
-            </Button>
-          </form>
-          <p className="mt-2 px-1 text-[10px] text-slate-400">
-            Enter 发送 · 重要结论请核对原始证据
-          </p>
-        </div>
-      </section>
-    </aside>
+              {chatting && (
+                <div className="flex items-start gap-2.5">
+                  <span className="grid size-7 place-items-center rounded-lg bg-blue-700 text-white">
+                    <IconRobot size={15} />
+                  </span>
+                  <div className="flex gap-1 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
+                    {[0, 1, 2].map((dot) => (
+                      <span
+                        key={dot}
+                        className="size-1.5 animate-pulse rounded-full bg-slate-400"
+                        style={{ animationDelay: `${dot * 140}ms` }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+            <div className="shrink-0 border-t border-slate-200 bg-white p-3">
+              {!messages.length && (
+                <div className="mb-3 flex gap-2 overflow-x-auto [scrollbar-width:none]">
+                  {[
+                    '为什么停在这里？',
+                    '我需要确认什么？',
+                    '用了哪些 RAG 资料？',
+                  ].map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={() => setQuestion(suggestion)}
+                      className="shrink-0 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <form onSubmit={ask} className="flex items-end gap-2">
+                <Textarea
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === 'Enter' &&
+                      !event.shiftKey &&
+                      !event.nativeEvent.isComposing
+                    ) {
+                      event.preventDefault();
+                      event.currentTarget.form?.requestSubmit();
+                    }
+                  }}
+                  aria-label="输入案件问题"
+                  placeholder="输入案件问题…"
+                  className="max-h-28 min-h-11 resize-none !border-slate-300 !bg-white py-2.5 text-sm !text-slate-950 caret-blue-600 placeholder:!text-slate-400 focus-visible:!border-blue-500 focus-visible:!ring-blue-500/20"
+                />
+                <Button
+                  type="submit"
+                  size="icon"
+                  disabled={chatting || !question.trim()}
+                  aria-label="发送问题"
+                  className="size-11 shrink-0 rounded-xl bg-blue-700 hover:bg-blue-800"
+                >
+                  {chatting ? (
+                    <IconLoader2 className="animate-spin" />
+                  ) : (
+                    <IconSend />
+                  )}
+                </Button>
+              </form>
+              <p className="mt-2 px-1 text-[10px] text-slate-400">
+                Enter 发送 · 重要结论请核对原始证据
+              </p>
+            </div>
+          </section>
+        </aside>
+      )}
+    </>
   );
 }
 
@@ -1725,6 +2201,16 @@ export function CaseDetail({ caseId }: { caseId: string }) {
   const [error, setError] = useState('');
   const [selectedEntityId, setSelectedEntityId] = useState('');
   const [selectedStage, setSelectedStage] = useState('');
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleValue, setTitleValue] = useState('');
+  const [savingTitle, setSavingTitle] = useState(false);
+
+  const applyCaseUpdate = (next: CraCase) => {
+    setItem((current) => ({
+      ...next,
+      capabilities: next.capabilities || current?.capabilities,
+    }));
+  };
 
   const load = useCallback(async () => {
     setError('');
@@ -1752,6 +2238,9 @@ export function CaseDetail({ caseId }: { caseId: string }) {
   useEffect(() => {
     if (item) setSelectedStage(visibleStage(item.workflow.current_stage));
   }, [item]);
+  useEffect(() => {
+    if (item && !editingTitle) setTitleValue(item.title);
+  }, [editingTitle, item]);
 
   const progress = useMemo(
     () =>
@@ -1773,7 +2262,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
     setActing(true);
     setError('');
     try {
-      setItem(await craApi.run(item.case_id));
+      applyCaseUpdate(await craApi.run(item.case_id));
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : 'Agent 执行失败');
     } finally {
@@ -1789,7 +2278,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
     setActing(true);
     setError('');
     try {
-      setItem(await craApi.resolve(item.case_id, task.id, resolution));
+      applyCaseUpdate(await craApi.resolve(item.case_id, task.id, resolution));
     } catch (resolveError) {
       setError(
         resolveError instanceof Error ? resolveError.message : '提交失败'
@@ -1804,7 +2293,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
     setActing(true);
     setError('');
     try {
-      setItem(await craApi.useDemoFinancials(item.case_id));
+      applyCaseUpdate(await craApi.useDemoFinancials(item.case_id));
     } catch (demoError) {
       setError(
         demoError instanceof Error ? demoError.message : '无法载入演示财报'
@@ -1820,7 +2309,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
     setError('');
     try {
       const updated = await craApi.uploadFinancialReport(item.case_id, file);
-      setItem(updated);
+      applyCaseUpdate(updated);
       setSelectedStage('financial_evidence');
       toast.success('财报已完成抽取', {
         description: `已进入财务证据签署，共 ${((updated.notes.financial_values || []) as unknown[]).length} 个字段。`,
@@ -1842,7 +2331,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
     setActing(true);
     setError('');
     try {
-      setItem(
+      applyCaseUpdate(
         await craApi.saveRiskOpinion(
           item.case_id,
           opinion as {
@@ -1867,7 +2356,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
     setActing(true);
     setError('');
     try {
-      setItem(await craApi.regenerateRiskOpinion(item.case_id));
+      applyCaseUpdate(await craApi.regenerateRiskOpinion(item.case_id));
     } catch (regenerateError) {
       setError(
         regenerateError instanceof Error
@@ -1879,15 +2368,38 @@ export function CaseDetail({ caseId }: { caseId: string }) {
     }
   };
 
+  const saveCaseTitle = async () => {
+    if (!item) return;
+    const nextTitle = titleValue.trim();
+    if (nextTitle.length < 2) {
+      setError('案件名称至少需要 2 个字符');
+      return;
+    }
+    if (nextTitle === item.title) {
+      setEditingTitle(false);
+      return;
+    }
+    setSavingTitle(true);
+    setError('');
+    try {
+      applyCaseUpdate(await craApi.updateCaseTitle(item.case_id, nextTitle));
+      setEditingTitle(false);
+      toast.success('案件名称已更新');
+    } catch (titleError) {
+      setError(
+        titleError instanceof Error ? titleError.message : '案件名称保存失败'
+      );
+    } finally {
+      setSavingTitle(false);
+    }
+  };
+
   if (loading)
     return (
       <div className="mx-auto max-w-[1600px] space-y-5 px-4 py-8 md:px-7">
         <Skeleton className="h-8 w-72" />
         <Skeleton className="h-32 w-full rounded-2xl" />
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <Skeleton className="h-[520px] rounded-2xl" />
-          <Skeleton className="h-[620px] rounded-2xl" />
-        </div>
+        <Skeleton className="h-[520px] rounded-2xl" />
       </div>
     );
   if (!item)
@@ -1906,6 +2418,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
 
   const wf = item.workflow;
   const task = item.human_tasks[0];
+  const capabilities = item.capabilities;
   const needsFinancialReport = wf.current_stage === 'financial_evidence';
   const currentVisibleStage = visibleStage(wf.current_stage);
   const viewedStage = selectedStage || currentVisibleStage;
@@ -1935,6 +2448,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
         onConfirm={() =>
           void resolve(task, { selected_entity_id: selectedEntityId })
         }
+        readOnly={!capabilities?.can_confirm_entity}
       />
     );
   } else if (task?.task_type === 'financial_signoff') {
@@ -1942,12 +2456,14 @@ export function CaseDetail({ caseId }: { caseId: string }) {
       <FinancialReview
         item={item}
         acting={acting}
+        onUpload={uploadFinancialReport}
         onConfirm={() =>
           void resolve(task, {
             confirmed_fields: ((item.notes.financial_values || []) as unknown[])
               .length,
           })
         }
+        readOnly={!capabilities?.can_sign_financial}
       />
     );
   } else if (task?.task_type === 'risk_signoff') {
@@ -1955,8 +2471,8 @@ export function CaseDetail({ caseId }: { caseId: string }) {
       <RiskReview
         item={item}
         acting={acting}
-        editable
-        signable
+        editable={Boolean(capabilities?.can_write)}
+        signable={Boolean(capabilities?.can_sign_risk)}
         onSave={(opinion) => void saveRiskOpinion(opinion)}
         onRegenerate={() => void regenerateRiskOpinion()}
         onConfirm={(opinion) => void resolve(task, { opinion })}
@@ -1971,7 +2487,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
         <RiskReview
           item={item}
           acting={acting}
-          editable
+          editable={Boolean(capabilities?.can_write)}
           signable={false}
           onSave={(opinion) => void saveRiskOpinion(opinion)}
           onRegenerate={() => void regenerateRiskOpinion()}
@@ -1986,6 +2502,8 @@ export function CaseDetail({ caseId }: { caseId: string }) {
             task &&
             void resolve(task, { export_file: item.notes.export_file_name })
           }
+          canApprove={Boolean(capabilities?.can_approve_final)}
+          canRun={Boolean(capabilities?.can_write)}
         />
       </>
     );
@@ -1997,11 +2515,17 @@ export function CaseDetail({ caseId }: { caseId: string }) {
         onUpload={uploadFinancialReport}
         onRun={() => void run()}
         onDemo={() => void loadDemoFinancials()}
+        readOnly={Boolean(capabilities?.maintenance_read_only)}
       />
     );
   } else if (wf.status === 'running' || wf.status === 'ready') {
     workArea = (
-      <RunningStep item={item} acting={acting} onRun={() => void run()} />
+      <RunningStep
+        item={item}
+        acting={acting}
+        onRun={() => void run()}
+        readOnly={Boolean(capabilities?.maintenance_read_only)}
+      />
     );
   } else if (wf.status === 'completed') {
     const exportAvailable = Boolean(item.notes.export_path);
@@ -2027,7 +2551,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
                   案件已完成并归档
                 </p>
                 <p className="mt-1 text-xs text-emerald-800">
-                  正式文件、人工签署、证据与 Agent 执行日志已关联。
+                  正式文件、人工签署、证据与系统执行记录已关联。
                 </p>
               </div>
             </div>
@@ -2071,74 +2595,136 @@ export function CaseDetail({ caseId }: { caseId: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-[1600px] px-4 py-7 md:px-7 md:py-9">
-      <Link
-        href="/workspace"
-        className="mb-5 inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-900"
-      >
-        <IconArrowLeft size={17} /> 返回案件工作台
-      </Link>
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-[-0.03em] md:text-3xl">
-              {item.title}
-            </h1>
-            <span
-              className={`rounded-md px-2 py-1 text-[11px] font-semibold ${statusTone[wf.status]}`}
+    <div className="mx-auto max-w-[1440px] px-4 pb-24 md:px-7 md:pb-24">
+      <section className="sticky top-16 z-10 -mx-4 border-b border-slate-200 bg-[#f5f7fb]/95 px-4 py-3 shadow-[0_12px_28px_-28px_rgba(15,23,42,.75)] backdrop-blur md:-mx-7 md:px-7">
+        <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <Link
+              href="/workspace"
+              className="grid size-11 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-white hover:text-slate-900"
+              aria-label="返回案件工作台"
+              title="返回案件工作台"
             >
-              {statusLabels[wf.status]}
-            </span>
+              <IconArrowLeft size={17} />
+            </Link>
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {editingTitle ? (
+                  <form
+                    className="flex max-w-2xl min-w-[280px] flex-1 items-center gap-1.5"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void saveCaseTitle();
+                    }}
+                  >
+                    <input
+                      autoFocus
+                      value={titleValue}
+                      onChange={(event) => setTitleValue(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          setTitleValue(item.title);
+                          setEditingTitle(false);
+                        }
+                      }}
+                      maxLength={160}
+                      aria-label="案件名称"
+                      className="h-9 min-w-0 flex-1 rounded-lg border border-blue-400 bg-white px-3 text-base font-semibold tracking-[-0.02em] text-slate-950 ring-2 ring-blue-500/15 outline-none"
+                    />
+                    <Button
+                      type="submit"
+                      size="icon"
+                      disabled={savingTitle}
+                      className="size-11 rounded-lg bg-blue-700 hover:bg-blue-800"
+                      aria-label="保存案件名称"
+                    >
+                      {savingTitle ? (
+                        <IconLoader2 className="animate-spin" />
+                      ) : (
+                        <IconCheck />
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      disabled={savingTitle}
+                      onClick={() => {
+                        setTitleValue(item.title);
+                        setEditingTitle(false);
+                      }}
+                      className="size-11 rounded-lg"
+                      aria-label="取消编辑案件名称"
+                    >
+                      <IconX />
+                    </Button>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!capabilities?.can_write}
+                    onClick={() => setEditingTitle(true)}
+                    className="group flex max-w-3xl min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-left hover:bg-white focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:outline-none disabled:cursor-default disabled:hover:bg-transparent"
+                    title={
+                      capabilities?.can_write ? '编辑案件名称' : item.title
+                    }
+                  >
+                    <h1 className="truncate text-lg font-semibold tracking-[-0.025em] text-slate-950 md:text-xl">
+                      {item.title}
+                    </h1>
+                    {capabilities?.can_write && (
+                      <IconPencil
+                        size={15}
+                        className="shrink-0 text-slate-400 transition-colors group-hover:text-blue-700"
+                      />
+                    )}
+                  </button>
+                )}
+                <span
+                  className={`rounded-md px-2 py-1 text-[10px] font-semibold ${statusTone[wf.status]}`}
+                >
+                  {statusLabels[wf.status]}
+                </span>
+              </div>
+              <p className="mt-0.5 truncate px-2 text-[11px] text-slate-500">
+                {item.case_id} · BP {item.bp} · {item.customer.name} ·{' '}
+                {item.credit_segment}
+              </p>
+            </div>
           </div>
-          <p className="mt-2 text-sm text-slate-500">
-            {item.case_id} · BP {item.bp} · {item.customer.name} ·{' '}
-            {item.credit_segment}
-          </p>
-        </div>
-        <button
-          onClick={() => void load()}
-          className="grid size-10 place-items-center rounded-xl bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
-          aria-label="刷新案件"
-        >
-          <IconRefresh size={18} />
-        </button>
-      </div>
 
-      {error && (
-        <div
-          role="alert"
-          className="mt-5 flex gap-3 rounded-xl bg-red-50 p-4 text-sm text-red-800 ring-1 ring-red-200"
-        >
-          <IconAlertTriangle size={19} className="shrink-0" />
-          {error}
+          <div className="flex items-center gap-3 xl:w-[390px]">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1.5 flex items-center justify-between gap-3 text-[11px]">
+                <span className="flex min-w-0 items-center gap-2 font-medium text-slate-700">
+                  <span
+                    className={`size-1.5 shrink-0 rounded-full ${wf.status === 'running' ? 'animate-pulse bg-blue-600' : wf.status === 'blocked' ? 'bg-red-500' : wf.status === 'completed' ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                  />
+                  <span className="truncate">{wf.current_task}</span>
+                </span>
+                <span className="shrink-0 font-semibold text-slate-900 tabular-nums">
+                  {progress}%
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-blue-600 transition-[width] duration-500"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void load()}
+              className="grid size-11 shrink-0 place-items-center rounded-lg bg-white text-slate-500 ring-1 ring-slate-200 hover:text-slate-900"
+              aria-label="刷新案件"
+            >
+              <IconRefresh size={16} />
+            </button>
+          </div>
         </div>
-      )}
 
-      <section className="mt-7 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-xs font-medium text-slate-500">当前任务</p>
-            <div className="mt-2 flex items-center gap-2">
-              <span
-                className={`size-2 rounded-full ${wf.status === 'running' ? 'animate-pulse bg-blue-600' : wf.status === 'blocked' ? 'bg-red-500' : wf.status === 'completed' ? 'bg-emerald-500' : 'bg-amber-500'}`}
-              />
-              <h2 className="text-base font-semibold">{wf.current_task}</h2>
-            </div>
-          </div>
-          <div className="min-w-[280px] lg:w-[420px]">
-            <div className="mb-2 flex items-center justify-between text-xs">
-              <span className="text-slate-500">总流程进度</span>
-              <span className="font-semibold tabular-nums">{progress}%</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-              <div
-                className="h-full rounded-full bg-blue-600 transition-[width] duration-500"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
-        </div>
-        <div className="mt-6 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+        <div className="mt-2 flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none]">
           {visibleStages.map((stage, index) => {
             const active = viewedStage === stage;
             const current = currentVisibleStage === stage;
@@ -2153,39 +2739,42 @@ export function CaseDetail({ caseId }: { caseId: string }) {
                 aria-current={current ? 'step' : undefined}
                 aria-pressed={active}
                 onClick={() => setSelectedStage(stage)}
-                className={`min-h-20 rounded-xl px-3 py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:cursor-not-allowed ${
+                className={`flex h-11 min-w-[150px] flex-1 items-center gap-2 rounded-lg px-2.5 text-left text-[11px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:cursor-not-allowed ${
                   active
-                    ? 'bg-blue-50 text-blue-800 ring-1 ring-blue-200'
+                    ? 'bg-blue-100 text-blue-800'
                     : done
-                      ? 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                      ? 'text-emerald-700 hover:bg-emerald-50'
                       : current
-                        ? 'bg-blue-50/50 text-blue-800 hover:bg-blue-50'
-                        : 'bg-slate-50 text-slate-400'
+                        ? 'text-blue-700 hover:bg-blue-50'
+                        : 'text-slate-400'
                 }`}
               >
-                <span className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] tabular-nums opacity-70">
-                    0{index + 1}
-                  </span>
-                  {active && done ? (
-                    <IconEye size={14} aria-hidden="true" />
-                  ) : done ? (
-                    <IconCheck size={14} aria-hidden="true" />
-                  ) : null}
+                <span
+                  className={`grid size-5 shrink-0 place-items-center rounded-full text-[9px] font-semibold ${active ? 'bg-blue-700 text-white' : done ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}
+                >
+                  {done ? <IconCheck size={12} /> : index + 1}
                 </span>
-                <span className="mt-1 block text-xs font-semibold">
-                  {stageLabels[stage]}
-                </span>
-                <span className="mt-1 block text-[10px] opacity-70">
-                  {current ? '当前步骤' : done ? '点击回看' : '尚未开始'}
-                </span>
+                <span className="truncate">{stageLabels[stage]}</span>
+                {current && (
+                  <span className="ml-auto size-1.5 shrink-0 rounded-full bg-blue-600" />
+                )}
               </button>
             );
           })}
         </div>
       </section>
 
-      <div className="mt-6 grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+      {error && (
+        <div
+          role="alert"
+          className="mt-5 flex gap-3 rounded-xl bg-red-50 p-4 text-sm text-red-800 ring-1 ring-red-200"
+        >
+          <IconAlertTriangle size={19} className="shrink-0" />
+          {error}
+        </div>
+      )}
+
+      <div className="pt-5">
         <main className="min-w-0 space-y-5">
           {viewingHistory && (
             <div className="flex flex-col gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950 sm:flex-row sm:items-center sm:justify-between">
@@ -2215,8 +2804,8 @@ export function CaseDetail({ caseId }: { caseId: string }) {
           {workArea}
           <AuditCaseFile item={item} />
         </main>
-        <CaseChat item={item} />
       </div>
+      {!capabilities?.maintenance_read_only && <CaseChat item={item} />}
     </div>
   );
 }

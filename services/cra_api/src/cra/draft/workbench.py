@@ -83,19 +83,19 @@ def _fallback_qualitative(case: Case) -> Dict[str, Dict[str, str]]:
     company_type = (
         "Public listed"
         if "上市" in hint or "listed" in hint
+        else "Private - unaudited"
+        if "未审计" in hint or "unaudited" in hint
         else "Private - audited"
         if "审计" in hint or "audited" in hint
-        else "Private - unaudited"
+        else ""
     )
-    country = case.customer.get("country", "")
-    sovereign = "grade A or above" if country in {"US", "CA", "DE", "FR", "GB", "JP", "KR", "CN"} else "grade B"
     distinction = inputs.get("customer_distinction_from_sales", "")
     if distinction not in QUALITATIVE_OPTIONS["customer_distinction"]:
         distinction = "Standard"
     return {
         "pay_habits": {"choice": pay, "reason": f"SAP 应收记录：{inputs.get('pay_habits_detail') or '未提供'} [S3]"},
-        "company_type": {"choice": company_type, "reason": f"公司类型线索：{inputs.get('company_type_hint') or '未提供'} [S3]"},
-        "sovereign_rating": {"choice": sovereign, "reason": f"客户所在国家为 {country or '未提供'}，由分析师根据当期制度复核 [S3]"},
+        "company_type": {"choice": company_type, "reason": f"公司类型线索：{inputs.get('company_type_hint') or '未提供'}；仍需核验原件 [S3]"},
+        "sovereign_rating": {"choice": "", "reason": "缺少经批准的国家风险到 CRA 档位映射，待分析师核定 [S3]"},
         "customer_distinction": {"choice": distinction, "reason": f"商务部门标注为 {distinction} [S3]"},
     }
 
@@ -150,6 +150,7 @@ def deterministic_risk_opinion(
         else f"客户所在国家为 {case.customer.get('country') or '未提供'}"
     )
     demo_warning = (notes.get("financial_source") or {}).get("warning")
+    financial_signed = bool((notes.get("human_resolutions") or {}).get("financial_signoff"))
 
     company = case.customer.get("name", "未命名客户")
     location = " ".join(filter(None, [case.customer.get("city"), case.customer.get("state"), case.customer.get("country")]))
@@ -160,22 +161,23 @@ def deterministic_risk_opinion(
         f"流动比率 {_fmt(current_ratio, 2)}，利息保障倍数 {_fmt(interest_cover, 1)}，"
         f"资产负债率 {_fmt(leverage, 1)}%，营业利润率 {_fmt(margin, 1)}%，"
         f"有形净资产 {_fmt(tangible_net_worth, 0)} {case.statement_currency}。[S1]"
-        if current
-        else "偿债能力、杠杆和盈利能力缺少可签署的当期财务材料。[S1]"
+        if current and financial_signed
+        else "当期财务证据尚未签署，偿债能力、杠杆和盈利能力不得据此作确定性判断。[S1]"
     )
     warning_line = f"\n3. {demo_warning}" if demo_warning else ""
     comments = (
-        f"【初步意见】有条件支持：申请额度 {case.requested_cl_usd:,.0f} 美元，"
-        "需在核对当期财务证据、D&B 主体和适用制度后由有权人审批。[S3]\n"
+        f"【初步意见】待评估：申请额度 {case.requested_cl_usd:,.0f} 美元，"
+        "需核对当期财务证据、主体、付款记录和适用制度；本草稿不构成授信建议或批准。[S3]\n"
         f"【主要风险】1. {financial_risk}\n"
         f"2. 国家风险线索为“{sovereign}”，需按当期分类和公司制度复核。[S3]{warning_line}\n"
-        f"【缓释因素】付款记录：{pay_detail}。[S3] 经营现金流为 {_fmt(current.get('operating_cash_flow'), 0)} {case.statement_currency}。[S1]\n"
+        f"【待核线索】演示付款记录：{pay_detail}。[S3] "
+        f"经营现金流待财务证据签署后核验。[S1]\n"
         "【建议条件】确认原始报表、评分规则版本和最终额度；如申请额度高于 CRA 建议额度，记录偏离理由并按制度升级审批。"
     )
     return {
         "draft": {
             "company_description": description,
-            "stance": "有条件支持",
+            "stance": "待评估",
             "risk_comments": comments,
             "qualitative": _fallback_qualitative(case),
             "draft_mode": "deterministic_fallback",

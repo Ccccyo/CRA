@@ -10,15 +10,15 @@ from cra.resources import knowledge_source_type
 
 
 ROLE_ACCESS = {
-    "super_admin": {"policy", "public_reference", "case_history"},
-    "admin": {"policy", "public_reference", "case_history"},
-    "分析师": {"policy", "public_reference"},
-    "高级分析师": {"policy", "public_reference", "case_history"},
-    "区域信用经理": {"policy", "public_reference", "case_history"},
-    "credit_analyst": {"policy", "public_reference"},
-    "senior_credit_analyst": {"policy", "public_reference", "case_history"},
-    "credit_manager": {"policy", "public_reference", "case_history"},
-    "quality_manager": {"policy", "public_reference", "case_history"},
+    "super_admin": {"policy", "public_reference", "case_history", "proposed_rule", "evidence_spec"},
+    "admin": {"policy", "public_reference", "case_history", "proposed_rule", "evidence_spec"},
+    "分析师": {"policy", "public_reference", "case_history", "proposed_rule", "evidence_spec"},
+    "高级分析师": {"policy", "public_reference", "case_history", "proposed_rule", "evidence_spec"},
+    "区域信用经理": {"policy", "public_reference", "case_history", "proposed_rule", "evidence_spec"},
+    "credit_analyst": {"policy", "public_reference", "case_history", "proposed_rule", "evidence_spec"},
+    "senior_credit_analyst": {"policy", "public_reference", "case_history", "proposed_rule", "evidence_spec"},
+    "credit_manager": {"policy", "public_reference", "case_history", "proposed_rule", "evidence_spec"},
+    "quality_manager": {"policy", "public_reference", "case_history", "proposed_rule", "evidence_spec"},
 }
 
 LIBRARIES = [
@@ -38,7 +38,21 @@ LIBRARIES = [
         "id": "case_history",
         "label": "历史案件",
         "description": "既往申报、审批判断与处置经验。",
-        "required_role": "高级分析师及以上",
+        "required_role": "信用分析师及以上",
+    },
+    {
+        "id": "proposed_rule",
+        "label": "拟议风控规则（演示）",
+        "description": "公开资料启发的待签核控制建议；不是现行授信制度。",
+        "required_role": "演示知识版本下的信用分析师及以上",
+        "read_only": True,
+    },
+    {
+        "id": "evidence_spec",
+        "label": "证据规范（演示）",
+        "description": "需要哪些证据、如何引用；不包含实际客户资料。",
+        "required_role": "演示知识版本下的信用分析师及以上",
+        "read_only": True,
     },
 ]
 
@@ -85,43 +99,78 @@ def _document_title(citation: str, fallback: str) -> str:
     return value.replace("公开资料/", "").replace("历史申报/", "") or fallback
 
 
-def knowledge_catalog(chunks: Iterable[Any], principal: Dict[str, str]) -> Dict[str, Any]:
+def knowledge_catalog(
+    source_documents: Iterable[Dict[str, Any]], principal: Dict[str, str],
+    demo_release_id: str = "",
+) -> Dict[str, Any]:
     access = ROLE_ACCESS.get(principal["role"], set())
     documents: Dict[str, Dict[str, Dict[str, Any]]] = {
         item["id"]: {} for item in LIBRARIES
     }
     chunk_totals = {item["id"]: 0 for item in LIBRARIES}
 
-    for chunk in chunks:
-        library_id = source_type(chunk.citation)
-        chunk_totals[library_id] += 1
-        document_id = chunk.id.split("#", 1)[0]
-        document = documents[library_id].setdefault(
-            document_id,
-            {
-                "id": document_id,
-                "title": _document_title(chunk.citation, document_id),
-                "citation": chunk.citation,
-                "preview": chunk.text[:220].strip(),
-                "chunk_count": 0,
-                "chunks": [],
-            },
+    for source_document in source_documents:
+        metadata = source_document.get("metadata") or {}
+        is_case_archive = metadata.get("source_kind") == "completed_case_archive"
+        if is_case_archive and (
+            source_document.get("library_id") != "case_history"
+            or not demo_release_id
+            or metadata.get("demo_release_id") != demo_release_id
+            or metadata.get("demo_only") is not True
+            or metadata.get("is_mock") is not True
+            or metadata.get("is_published") is not True
+            or metadata.get("workflow_status") != "completed"
+            or metadata.get("authority") != "derived_completed_case_not_approval"
+        ):
+            continue
+        if source_document.get("library_id") in {"proposed_rule", "evidence_spec"} and (
+            not demo_release_id
+            or metadata.get("demo_release_id") != demo_release_id
+            or metadata.get("demo_only") is not True
+            or metadata.get("is_published") is not True
+        ):
+            continue
+        if demo_release_id and principal["role"] not in {"admin", "super_admin"}:
+            if (
+                metadata.get("demo_release_id") != demo_release_id
+                or metadata.get("is_published") is not True
+                or (source_document.get("library_id") == "case_history" and not is_case_archive)
+            ):
+                continue
+        library_id = source_document.get("library_id") or source_type(
+            source_document.get("citation", "")
         )
-        document["chunk_count"] += 1
-        document["chunks"].append(
-            {
-                "id": chunk.id,
-                "citation": chunk.citation,
-                "section": chunk.section,
-                "page": chunk.page,
-                "text": chunk.text,
-            }
-        )
+        if library_id not in documents:
+            continue
+        chunk_count = int(source_document.get("chunk_count") or 0)
+        chunk_totals[library_id] += chunk_count
+        document_id = source_document["id"]
+        documents[library_id][document_id] = {
+            "id": document_id,
+            "title": source_document.get("title")
+            or _document_title(source_document.get("citation", ""), document_id),
+            "citation": source_document.get("citation", ""),
+            "source_filename": source_document.get("source_filename") or "",
+            "mime_type": source_document.get("mime_type") or "text/markdown",
+            "chunk_count": chunk_count,
+            "updated_at": source_document.get("updated_at") or "",
+            "parser": metadata.get("parser", "legacy"),
+            "has_original": bool(metadata.get("source_storage_name")),
+            "demo_only": metadata.get("demo_only") is True,
+            "document_version": metadata.get("document_version") or "",
+            "effective_from": metadata.get("effective_from") or "",
+            "effective_to": metadata.get("effective_to") or "",
+            "read_only": metadata.get("managed_by") == "case_knowledge.py",
+        }
 
     libraries: List[Dict[str, Any]] = []
     for definition in LIBRARIES:
         library_id = definition["id"]
-        accessible = library_id in access
+        accessible = library_id in access and (
+            library_id not in {"proposed_rule", "evidence_spec"}
+            or bool(demo_release_id)
+            or principal["role"] in {"admin", "super_admin"}
+        )
         visible_documents = list(documents[library_id].values()) if accessible else []
         libraries.append(
             {

@@ -12,13 +12,10 @@
     "src/app/api/**/*.ts": {
       "maxDuration": 30
     },
-    "src/app/api/ai/**/*.ts": {
+    "src/app/api/cra/**/*.ts": {
       "maxDuration": 60
     },
-    "src/app/api/payment/**/*.ts": {
-      "maxDuration": 30
-    },
-    "src/app/api/storage/**/*.ts": {
+    "src/app/api/files/**/*.ts": {
       "maxDuration": 30
     }
   },

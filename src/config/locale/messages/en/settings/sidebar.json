@@ -1,46 +1,11 @@
 {
-  "title": "Settings",
-  "nav": {
-    "items": [
-      {
-        "title": "Profile",
-        "url": "/settings/profile",
-        "icon": "User"
-      },
-      {
-        "title": "Billing",
-        "url": "/settings/billing",
-        "icon": "CreditCard"
-      },
-      {
-        "title": "Payments",
-        "url": "/settings/payments",
-        "icon": "DollarSign"
-      },
-      {
-        "title": "Credits",
-        "url": "/settings/credits",
-        "icon": "Coins"
-      },
-      {
-        "title": "API Keys",
-        "url": "/settings/apikeys",
-        "icon": "RiKeyLine"
-      }
-    ]
-  },
-  "top_nav": {
-    "items": [
-      {
-        "title": "Activity",
-        "url": "/activity",
-        "icon": "Activity"
-      },
-      {
-        "title": "Settings",
-        "url": "/settings",
-        "icon": "Settings"
-      }
-    ]
-  }
+  "title": "Account Settings",
+  "nav": {"items": [
+    {"title": "Profile", "url": "/settings/profile", "icon": "User"},
+    {"title": "Security", "url": "/settings/security", "icon": "ShieldCheck"}
+  ]},
+  "top_nav": {"items": [
+    {"title": "CRA Workspace", "url": "/workspace", "icon": "LayoutDashboard"},
+    {"title": "Account Settings", "url": "/settings", "icon": "Settings"}
+  ]}
 }

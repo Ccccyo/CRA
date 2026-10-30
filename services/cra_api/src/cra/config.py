@@ -29,9 +29,13 @@ class Settings:
     reasoner_model: str
     embed_model: str
     rerank_model: str
+    rag_use_vector: bool
+    rag_use_rerank: bool
     glm_api_key: str
     glm_base_url: str
-    ocr_backend: str  # auto / glm / paddle / none
+    ocr_backend: str  # auto / glm / paddle / paddle_api / none
+    paddle_ocr_api_url: str
+    paddle_ocr_api_token: str
     data_dir: Path
     eval_dir: Path
     reports_dir: Path
@@ -56,9 +60,15 @@ def get_settings() -> Settings:
         reasoner_model=os.environ.get("REASONER_MODEL", "deepseek-reasoner"),
         embed_model=os.environ.get("EMBED_MODEL", "BAAI/bge-m3"),
         rerank_model=os.environ.get("RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),
+        rag_use_vector=os.environ.get("RAG_USE_VECTOR", "true").lower()
+        in {"1", "true", "yes", "on"},
+        rag_use_rerank=os.environ.get("RAG_USE_RERANK", "true").lower()
+        in {"1", "true", "yes", "on"},
         glm_api_key=os.environ.get("GLM_API_KEY", ""),
         glm_base_url=os.environ.get("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
         ocr_backend=os.environ.get("OCR_BACKEND", "auto").lower(),
+        paddle_ocr_api_url=os.environ.get("PADDLE_OCR_API_URL", "").strip(),
+        paddle_ocr_api_token=os.environ.get("PADDLE_OCR_API_TOKEN", "").strip(),
         data_dir=ROOT / "data",
         eval_dir=ROOT / "eval",
         reports_dir=ROOT / "reports",

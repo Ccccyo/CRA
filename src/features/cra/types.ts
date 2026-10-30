@@ -74,6 +74,14 @@ export type CraCase = {
   events: AgentEvent[];
   stage_history: StageSnapshot[];
   notes: Record<string, unknown>;
+  capabilities?: {
+    can_write: boolean;
+    can_confirm_entity: boolean;
+    can_sign_financial: boolean;
+    can_sign_risk: boolean;
+    can_approve_final: boolean;
+    maintenance_read_only: boolean;
+  };
   bad_cases: Array<{
     id: number;
     node: string;
@@ -111,23 +119,22 @@ export type RagDocument = {
   id: string;
   title: string;
   citation: string;
-  preview: string;
+  source_filename: string;
+  mime_type: string;
   chunk_count: number;
-  chunks: Array<{
-    id: string;
-    citation: string;
-    section: string;
-    page: number | null;
-    text: string;
-  }>;
+  updated_at: string;
+  parser: string;
+  has_original: boolean;
+  read_only?: boolean;
 };
 
 export type RagLibrary = {
-  id: 'policy' | 'public_reference' | 'case_history';
+  id: 'policy' | 'public_reference' | 'case_history' | 'proposed_rule' | 'evidence_spec';
   label: string;
   description: string;
   required_role: string;
   accessible: boolean;
+  read_only?: boolean;
   document_count: number;
   chunk_count: number;
   documents: RagDocument[];
@@ -145,16 +152,13 @@ export type KnowledgeCatalog = {
   libraries: RagLibrary[];
 };
 
-export type KnowledgeAdminDocument = {
+export type KnowledgeSourceDocument = RagDocument & {
   id: string;
   library_id: RagLibrary['id'];
-  title: string;
-  citation: string;
   source_content: string;
-  source_filename: string;
-  mime_type: string;
   metadata: Record<string, unknown>;
-  chunk_count: number;
-  updated_at: string;
   source_reconstructed: boolean;
+  preview_page_count?: number;
 };
+
+export type KnowledgeAdminDocument = KnowledgeSourceDocument;

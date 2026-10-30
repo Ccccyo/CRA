@@ -31,21 +31,26 @@ class _ConnectionPool:
         # Neon may suspend an idle compute or close a pooled socket. Bound every
         # network and SQL wait so a stale connection can never leave the UI on a
         # loading skeleton forever.
-        return psycopg.connect(
+        connection = psycopg.connect(
             self.database_url,
             row_factory=dict_row,
             connect_timeout=int(os.environ.get("CRA_DB_CONNECT_TIMEOUT", "8")),
-            options=(
-                "-c statement_timeout=12000 "
-                "-c lock_timeout=5000 "
-                "-c idle_in_transaction_session_timeout=12000"
-            ),
+            autocommit=True,
             keepalives=1,
             keepalives_idle=5,
             keepalives_interval=5,
             keepalives_count=2,
             tcp_user_timeout=12000,
         )
+        # Neon transaction poolers reject PostgreSQL `options` in the startup
+        # packet. Apply the same limits after connecting, then restore normal
+        # transactional behavior for the store.
+        with connection.cursor() as cursor:
+            cursor.execute("SET statement_timeout = 12000")
+            cursor.execute("SET lock_timeout = 5000")
+            cursor.execute("SET idle_in_transaction_session_timeout = 12000")
+        connection.autocommit = False
+        return connection
 
     def _discard(self, connection: Any) -> None:
         try:
@@ -243,6 +248,22 @@ class PostgresWorkflowStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_cra_knowledge_chunk_document
                     ON cra_knowledge_chunk(document_id);
+                CREATE TABLE IF NOT EXISTS cra_knowledge_audit_log (
+                    id SERIAL PRIMARY KEY,
+                    action TEXT NOT NULL,
+                    document_id TEXT NOT NULL,
+                    library_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    source_filename TEXT NOT NULL DEFAULT '',
+                    chunk_count INTEGER NOT NULL DEFAULT 0,
+                    actor_user_id TEXT NOT NULL,
+                    actor_name TEXT NOT NULL,
+                    actor_role TEXT NOT NULL,
+                    snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_cra_knowledge_audit_document
+                    ON cra_knowledge_audit_log(document_id, id);
                 CREATE TABLE IF NOT EXISTS cra_data_migration (
                     id TEXT PRIMARY KEY,
                     completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -430,6 +451,12 @@ class PostgresWorkflowStore:
                 ),
             )
             conn.commit()
+        self.sync_case_knowledge(payload["case_id"])
+
+    def sync_case_knowledge(self, case_id: str) -> bool:
+        from cra.case_knowledge import safe_sync_after_write
+
+        return safe_sync_after_write(self, case_id)
 
     @staticmethod
     def _case_row(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -443,6 +470,17 @@ class PostgresWorkflowStore:
             cursor.execute("SELECT * FROM cra_case WHERE case_id = %s", (case_id,))
             row = cursor.fetchone()
         return self._case_row(row) if row else None
+
+    def update_case_title(self, case_id: str, title: str) -> None:
+        with closing(self.connect()) as conn, conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE cra_case SET title = %s, updated_at = %s WHERE case_id = %s",
+                (title, now_iso(), case_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(case_id)
+            conn.commit()
+        self.sync_case_knowledge(case_id)
 
     def cases(self) -> List[Dict[str, Any]]:
         with closing(self.connect()) as conn, conn.cursor() as cursor:
@@ -625,6 +663,7 @@ class PostgresWorkflowStore:
                 [*clean.values(), case_id],
             )
             conn.commit()
+        self.sync_case_knowledge(case_id)
         return self.workflow(case_id)
 
     def add_event(
@@ -731,6 +770,7 @@ class PostgresWorkflowStore:
                 (case_id, Jsonb(payload)),
             )
             conn.commit()
+        self.sync_case_knowledge(case_id)
 
     def notes(self, case_id: str) -> Dict[str, Any]:
         with closing(self.connect()) as conn, conn.cursor() as cursor:
@@ -903,11 +943,42 @@ class PostgresWorkflowStore:
         with closing(self.connect()) as conn, conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, document_id, citation, section, page, content AS text
-                FROM cra_knowledge_chunk ORDER BY document_id, id
+                SELECT chunk.id, chunk.document_id, chunk.citation,
+                       chunk.section, chunk.page, chunk.content AS text,
+                       chunk.metadata, document.library_id
+                FROM cra_knowledge_chunk AS chunk
+                JOIN cra_knowledge_document AS document
+                  ON document.id = chunk.document_id
+                ORDER BY chunk.document_id, chunk.id
                 """
             )
             return list(cursor.fetchall())
+
+    def knowledge_revision(self) -> str:
+        with closing(self.connect()) as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COUNT(*)::integer AS chunk_count,
+                       COALESCE(MAX(updated_at)::text, '') AS latest_update
+                FROM cra_knowledge_chunk
+                """
+            )
+            row = cursor.fetchone()
+            return f"{row['chunk_count']}:{row['latest_update']}"
+
+    def knowledge_documents(self) -> List[Dict[str, Any]]:
+        with closing(self.connect()) as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT document.*, COUNT(chunk.id)::integer AS chunk_count
+                FROM cra_knowledge_document AS document
+                LEFT JOIN cra_knowledge_chunk AS chunk
+                  ON chunk.document_id = document.id
+                GROUP BY document.id
+                ORDER BY document.library_id, document.title
+                """
+            )
+            return [dict(row) for row in cursor.fetchall()]
 
     def knowledge_document(self, document_id: str) -> Optional[Dict[str, Any]]:
         with closing(self.connect()) as conn, conn.cursor() as cursor:
@@ -983,8 +1054,33 @@ class PostgresWorkflowStore:
             conn.commit()
         return self.knowledge_document(document["id"])
 
-    def delete_knowledge_document(self, document_id: str) -> bool:
+    def delete_knowledge_document(
+        self,
+        document_id: str,
+        audit: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         with closing(self.connect()) as conn, conn.cursor() as cursor:
+            if audit:
+                cursor.execute(
+                    """
+                    INSERT INTO cra_knowledge_audit_log
+                    (action, document_id, library_id, title, source_filename,
+                     chunk_count, actor_user_id, actor_name, actor_role, snapshot)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        audit.get("action", "delete"),
+                        document_id,
+                        audit.get("library_id", ""),
+                        audit.get("title", ""),
+                        audit.get("source_filename", ""),
+                        int(audit.get("chunk_count") or 0),
+                        audit.get("actor_user_id", ""),
+                        audit.get("actor_name", ""),
+                        audit.get("actor_role", ""),
+                        Jsonb(audit.get("snapshot") or {}),
+                    ),
+                )
             cursor.execute(
                 "DELETE FROM cra_knowledge_document WHERE id = %s RETURNING id",
                 (document_id,),
@@ -992,6 +1088,22 @@ class PostgresWorkflowStore:
             deleted = cursor.fetchone() is not None
             conn.commit()
             return deleted
+
+    def knowledge_audit_logs(self, document_id: str = "") -> List[Dict[str, Any]]:
+        with closing(self.connect()) as conn, conn.cursor() as cursor:
+            if document_id:
+                cursor.execute(
+                    """
+                    SELECT * FROM cra_knowledge_audit_log
+                    WHERE document_id = %s ORDER BY id DESC
+                    """,
+                    (document_id,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM cra_knowledge_audit_log ORDER BY id DESC"
+                )
+            return [dict(row) for row in cursor.fetchall()]
 
     def has_data_migration(self, migration_id: str) -> bool:
         with closing(self.connect()) as conn, conn.cursor() as cursor:

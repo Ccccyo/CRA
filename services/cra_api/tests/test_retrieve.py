@@ -1,8 +1,9 @@
 from cra.ingest.chunker import Chunk, chunk_markdown
 from cra.resources import policy_retriever
 from cra.retrieve import Hit
-from cra.retrieve.hybrid import rrf
+from cra.retrieve.hybrid import build_retriever, rrf
 from cra.retrieve.keyword import KeywordIndex, tokenize
+from cra.retrieve.runtime import RetrieverCache, ScopedRetriever
 
 
 def test_tokenize_keeps_codes_intact():
@@ -22,6 +23,7 @@ def test_chunk_markdown_splits_a_single_oversized_paragraph():
 
     assert len(chunks) == 3
     assert all(len(chunk.text) <= 1200 for chunk in chunks)
+    assert chunks[0].text[-100:] == chunks[1].text[:100]
 
 
 def test_keyword_exact_code_beats_similar_code():
@@ -59,3 +61,142 @@ def test_tokenize_keeps_dnb_and_domain_terms():
     assert tokenize("D&B 评级 3A2") == ["d&b", "评级", "3a2"]  # 回归：D&B 曾被切成 d、b
     toks = tokenize("利息保障倍数下降")
     assert "利息保障倍数" in toks and "倍数" in toks  # 整词和子词都在，问整词、问局部都能命中
+
+
+def test_process_retriever_cache_reuses_same_revision():
+    cache = RetrieverCache()
+    loads = []
+
+    def load():
+        loads.append(True)
+        return [Chunk("p#0", "额度审批规则", "policy.md")]
+
+    first = cache.get("revision-1", load, use_vector=False, use_rerank=False)
+    second = cache.get("revision-1", load, use_vector=False, use_rerank=False)
+    third = cache.get("revision-2", load, use_vector=False, use_rerank=False)
+
+    assert first is second
+    assert third is not first
+    assert len(loads) == 2
+
+
+def test_scoped_retriever_filters_library_and_case_metadata():
+    chunks = [
+        Chunk("p#0", "额度规则", "p.md", meta={"library_id": "policy"}),
+        Chunk("h#0", "历史额度", "h.md", meta={"library_id": "case_history"}),
+        Chunk(
+            "c1#0",
+            "本案额度",
+            "case.md",
+            meta={"library_id": "case_evidence", "case_id": "CASE-1"},
+        ),
+        Chunk(
+            "c2#0",
+            "别案额度",
+            "case.md",
+            meta={"library_id": "case_evidence", "case_id": "CASE-2"},
+        ),
+    ]
+    shared = build_retriever(chunks, use_vector=False, use_rerank=False)
+
+    analyst = ScopedRetriever(shared, {"policy"}, case_id="CASE-1")
+    ids = {hit.chunk.id for hit in analyst.search("额度", k=10)}
+    assert ids == {"p#0", "c1#0"}
+
+    case_only = ScopedRetriever(
+        shared, {"policy", "case_history"}, case_id="CASE-1", case_only=True
+    )
+    assert [hit.chunk.id for hit in case_only.search("额度", k=10)] == ["c1#0"]
+
+
+def test_scoped_retriever_excludes_unpublished_and_withdrawn_even_in_policy_library():
+    chunks = [
+        Chunk("active", "模拟政策检索词", "a.md", meta={"library_id": "policy"}),
+        Chunk("draft", "模拟政策检索词", "b.md", meta={
+            "library_id": "policy", "status": "staging", "is_published": False,
+        }),
+        Chunk("withdrawn", "模拟政策检索词", "c.md", meta={
+            "library_id": "policy", "status": "withdrawn", "is_published": True,
+        }),
+    ]
+    retriever = ScopedRetriever(
+        build_retriever(chunks, use_vector=False, use_rerank=False),
+        {"policy"},
+    )
+    assert [hit.chunk.id for hit in retriever.search("模拟政策检索词", k=5)] == ["active"]
+
+
+def test_scoped_retriever_reuses_results_across_request_views(monkeypatch):
+    shared = build_retriever(
+        [Chunk("p#cached", "查询结果缓存", "p.md", meta={"library_id": "policy"})],
+        use_vector=False,
+        use_rerank=False,
+    )
+    original = shared.search
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(shared, "search", counted)
+    first_view = ScopedRetriever(shared, {"policy"})
+    second_view = ScopedRetriever(shared, {"policy"})
+
+    assert first_view.search("查询结果缓存")[0].chunk.id == "p#cached"
+    assert second_view.search("查询结果缓存")[0].chunk.id == "p#cached"
+    assert len(calls) == 1
+
+
+def test_vector_sync_only_upserts_changed_chunks_and_deletes_removed(tmp_path):
+    from cra.retrieve.vector import VectorIndex
+
+    unchanged = Chunk(
+        "a", "额度规则", "a.md", meta={"library_id": "policy"}
+    )
+    changed = Chunk(
+        "b", "新额度规则", "b.md", meta={"library_id": "policy"}
+    )
+    previous_changed = Chunk(
+        "b", "旧额度规则", "b.md", meta={"library_id": "policy"}
+    )
+
+    class Matrix(list):
+        def tolist(self):
+            return list(self)
+
+    class Model:
+        def encode(self, texts, **kwargs):
+            return Matrix([[float(len(text))] for text in texts])
+
+    class Collection:
+        def __init__(self):
+            self.deleted = []
+            self.upserts = []
+
+        def get(self, include=None):
+            return {
+                "ids": ["a", "b", "removed"],
+                "metadatas": [
+                    {"content_hash": VectorIndex._content_hash(unchanged)},
+                    {"content_hash": VectorIndex._content_hash(previous_changed)},
+                    {"content_hash": "old"},
+                ],
+            }
+
+        def delete(self, ids):
+            self.deleted.extend(ids)
+
+        def upsert(self, **payload):
+            self.upserts.append(payload)
+
+    index = VectorIndex.__new__(VectorIndex)
+    index._model = Model()
+    index._col = Collection()
+    index._fp_file = tmp_path / "fingerprint.txt"
+
+    index.sync([unchanged, changed])
+
+    assert index._col.deleted == ["removed"]
+    assert [item for call in index._col.upserts for item in call["ids"]] == ["b"]
+    assert index._fp_file.is_file()

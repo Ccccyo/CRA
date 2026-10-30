@@ -54,13 +54,28 @@ npm run db:migrate
 
 CRA 增量迁移为 `src/config/db/migrations/0001_big_infant_terrible.sql`。`rbac:init` 会创建 CRA 权限和下列角色：
 
-| 角色                    | 用途                               |
-| ----------------------- | ---------------------------------- |
-| `credit_analyst`        | 建案、处理案件、读取制度和公开资料 |
-| `senior_credit_analyst` | 增加人工签署与历史案件权限         |
-| `credit_manager`        | 完整 CRA 管理权限                  |
-| `quality_manager`       | 案件、历史证据与 Bad Case 质量审查 |
-| `admin` / `super_admin` | 系统管理，同时拥有 CRA 权限        |
+| 角色                    | 用途                                                              |
+| ----------------------- | ----------------------------------------------------------------- |
+| `credit_analyst`        | 建案、处理案件、读取制度和公开资料                                |
+| `senior_credit_analyst` | 增加人工签署与历史案件权限                                        |
+| `credit_manager`        | 完整 CRA 管理权限                                                 |
+| `quality_manager`       | 案件、历史证据与 Bad Case 质量审查                                |
+| `admin`                 | 查看全部案件（只读），维护系统和 RAG 源文档，不参与案件办理与签署 |
+| `super_admin`           | 应急系统维护角色；案件仍为全部只读，不参与办理与签署              |
+
+### CRA 三角色权限边界
+
+| 业务能力                           | 信用分析师 | 高级信用分析师 | 系统管理员 |
+| ---------------------------------- | ---------- | -------------- | ---------- |
+| 建案、上传材料、运行 Agent         | 允许       | 允许           | 不允许     |
+| 主体确认                           | 经办签署   | 可经办         | 不允许     |
+| 财务证据签署                       | 经办签署   | 可经办         | 不允许     |
+| 风险意见签署                       | 经办签署   | 可经办         | 不允许     |
+| 最终复核并关闭案件                 | 不允许     | 独立审批       | 不允许     |
+| 阅读制度、公开资料、历史案件源文件 | 允许       | 允许           | 允许       |
+| 上传、编辑、删除 RAG 源文件        | 不允许     | 不允许         | 允许       |
+
+签署权限拆分为 `cra.cases.entity.confirm`、`cra.cases.financial.signoff`、`cra.cases.risk.signoff` 和 `cra.cases.final.approve`。新建案件会记录负责人用户 ID；最终复核时服务端拒绝案件负责人自审。
 
 数据库变更如需版本化，使用：
 
@@ -131,18 +146,20 @@ npm run auth:set-password -- --email=admin@example.com
 
 1. 用 `admin` 或 `super_admin` 账号登录。
 2. 打开 `/zh/workspace/knowledge`，点击“上传文档”。
-3. 选择公司制度、公开资料或历史案件，上传 `.md`、`.txt` 或带文字层的 `.pdf`（上限 10 MB）。
-4. 后端按 Markdown 标题和段落自动分块；PDF 按页保留页码。文档与全部 chunks 在同一数据库事务中写入。
+3. 选择公司制度、公开资料或历史案件，上传图片（PNG/JPG）、`.md`、`.txt`、`.pdf`、`.doc` 或 `.docx`（上限 10 MB）。
+4. 后端先生成一份可阅读、可编辑的完整解析正文，再按标题、段落或 PDF 页码建立内部检索索引。用户界面不展示分块结果。
 5. 选中文档后点击“编辑当前文档”，修改原文并保存时会删除旧 chunks、重新分块。Agent 检索直接读取数据库，不需重启。
 
-数据库中的原文位于 `cra_knowledge_document.source_content`，分段正文位于 `cra_knowledge_chunk.content`。扫描型 PDF 当前不会在上传请求中自动调用外部 OCR，需先转成带文字层的 PDF 或 UTF-8 文本。
+数据库中的完整解析正文位于 `cra_knowledge_document.source_content`，内部检索分段位于 `cra_knowledge_chunk.content`。图片和扫描型 PDF 使用已配置的本地 PaddleOCR、PaddleOCR API 或 GLM-OCR；混合 PDF 的扫描页未识别成功时整份上传失败，不写入部分内容。上传原文件保存在 `services/cra_api/runtime/knowledge-sources`。文档与片段元数据包含原件 SHA-256、解析文本 SHA-256、解析器、OCR 服务类型和 OCR 页码；OCR 结果标记 `ocr_requires_review`，不能直接视为已核验财务事实。编辑正文后旧片段被整体替换，原件哈希仍用于追溯原文件。
 
-原始 Excel/PDF 和生成的 Excel 二进制文件目前仍放在 `services/cra_api/runtime`。生产部署应把它们迁入 S3/R2 等对象存储，数据库仅保存对象键、版本、SHA-256 与审计元数据。向量索引仍可使用现有 BM25/Chroma；如切换 Neon `pgvector`，必须继续保留 source/section/page 引用。
+内置知识通过 `knowledge-seed-v2` 迁移为 `builtin-<hash>` 形式的 URL 安全文档 ID，并将仓库中的 Markdown/CSV 原文回填到 `source_content`。旧版 `公开资料/文件名` ID 含有 `/`，会被 Web 路由误判为额外路径并导致详情页 `Not Found`，迁移时会一并删除。当前工作台默认使用数据库 chunks 的 BM25 + BGE-M3 向量召回、RRF 和 BGE Reranker；权限通过 chunk 的 `library_id/case_id` 标签在检索前过滤。向量依赖与实际激活状态可在 `/health.rag` 查看。完整链路见 `docs/03-agent-and-rag.md`。
+
+原始 Excel/PDF 和生成的 Excel 二进制文件目前仍放在 `services/cra_api/runtime`。生产部署应把它们迁入 S3/R2 等对象存储，数据库仅保存对象键、版本、SHA-256 与审计元数据。向量索引仍可使用现有 BM25/Chroma；如切换 Neon `pgvector`，必须继续保留 source/section/page 引用。生产上传、对象存储、文件元数据、异步解析和无停机迁移的完整实施方案见 [`docs/15-enterprise-upload-storage-design.md`](15-enterprise-upload-storage-design.md)。
 
 ## 8. 上线前的其他配置
 
 - Agent 起草：配置 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`、`CHAT_MODEL` 和 `REASONER_MODEL`。
-- 扫描件 OCR：安装 PaddleOCR，或配置 `GLM_API_KEY`、`GLM_BASE_URL` 和 `OCR_BACKEND=glm`。
+- 扫描件 OCR：安装本地 PaddleOCR，或配置 `GLM_API_KEY`、`GLM_BASE_URL` 和 `OCR_BACKEND=glm`。如使用自建 PaddleOCR 3.x 服务，设置 `OCR_BACKEND=paddle_api`、`PADDLE_OCR_API_URL=https://<受信任主机>/ocr`，受保护部署可另设 `PADDLE_OCR_API_TOKEN`。本机服务允许 `http://127.0.0.1:<端口>/ocr`；远程服务必须 HTTPS。接口按图片页调用，需返回官方 pipeline serving 的 `ocrResults[].prunedResult.rec_texts/rec_boxes`。远程 OCR 会传输上传文档图像，必须先完成数据处理与访问控制评估；未配置时不会自动发送。
 - Demo 账号不要求邮箱验证，注册后直接创建会话。Resend 仅在未来接入密码重置等通知邮件时才需要配置。
 - 生产文件存储：在 `/zh/admin/settings/storage` 配置 R2/S3 兼容存储，并将 Python 案件附件层接入同一存储。
 - 部署：更换 `NEXT_PUBLIC_APP_URL` 和 `AUTH_URL`，为 Web 和 API 配置 HTTPS，只对外暴露 Web，不直接暴露 FastAPI 8001 端口。

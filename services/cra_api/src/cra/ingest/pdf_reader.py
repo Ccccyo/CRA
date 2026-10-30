@@ -25,6 +25,7 @@ class Page:
     number: int  # 从 1 开始，和人看到的页码一致
     text: str
     has_image: bool = False  # 页面上有图片（扫描件每页都是一张图）
+    ocr_applied: bool = False
 
     @property
     def needs_ocr(self) -> bool:
@@ -96,7 +97,7 @@ def extract_tables(path: Path, page_numbers: Sequence[int]) -> Dict[int, List[Li
 
 
 def ocr_backend() -> str:
-    """当前可用的 OCR：paddle（本地，默认优先）/ glm（智谱云端）/ none。"""
+    """Remote PaddleOCR is used only when explicitly selected."""
     import importlib.util
 
     from cra.config import get_settings
@@ -104,6 +105,8 @@ def ocr_backend() -> str:
     s = get_settings()
     has_glm = bool(s.glm_api_key)
     has_paddle = importlib.util.find_spec("paddleocr") is not None
+    if s.ocr_backend == "paddle_api":
+        return "paddle_api" if s.paddle_ocr_api_url else "none"
     if s.ocr_backend == "glm":
         return "glm" if has_glm else "none"
     if s.ocr_backend == "paddle":
@@ -113,7 +116,7 @@ def ocr_backend() -> str:
     return "paddle" if has_paddle else ("glm" if has_glm else "none")
 
 
-NO_OCR_MSG = "没有可用的 OCR：安装 PaddleOCR（pip install paddlepaddle paddleocr），或在 .env 填写 GLM_API_KEY"
+NO_OCR_MSG = "没有可用的 OCR：安装本地 PaddleOCR、配置 GLM_API_KEY，或设置 OCR_BACKEND=paddle_api 与 PADDLE_OCR_API_URL"
 
 
 def ocr_pages(path: Path, page_numbers: Sequence[int], backend: Optional[str] = None) -> Dict[int, str]:
@@ -121,6 +124,10 @@ def ocr_pages(path: Path, page_numbers: Sequence[int], backend: Optional[str] = 
     backend = backend or ocr_backend()
     if backend == "paddle":
         from cra.ingest.paddle_ocr import ocr_pdf_page
+
+        return {n: ocr_pdf_page(path, n) for n in page_numbers}
+    if backend == "paddle_api":
+        from cra.ingest.paddle_api_ocr import ocr_pdf_page
 
         return {n: ocr_pdf_page(path, n) for n in page_numbers}
     if backend == "glm":
@@ -143,7 +150,9 @@ def load_pdf_text(path: Path, use_ocr: Optional[bool] = None) -> List[Page]:
     if use_ocr is None and ocr_backend() == "none":
         return pages
     texts = ocr_pages(path, scanned)
-    return [Page(p.number, texts[p.number], p.has_image) if p.number in texts else p for p in pages]
+    if any(not texts.get(number, "").strip() for number in scanned):
+        raise RuntimeError("扫描页 OCR 未识别到文字；文件未入库")
+    return [Page(p.number, texts[p.number], p.has_image, True) if p.number in texts else p for p in pages]
 
 
 SCANNED_SHARE = 0.3  # 扫描页占比达到这个比例，才当作扫描件走 OCR
@@ -181,10 +190,14 @@ def load_document_text(path: Path, use_ocr: Optional[bool] = None) -> List[Page]
         if backend == "paddle":
             from cra.ingest.paddle_ocr import ocr_image
 
-            return [Page(1, ocr_image(path))]
+            return [Page(1, ocr_image(path), ocr_applied=True)]
+        if backend == "paddle_api":
+            from cra.ingest.paddle_api_ocr import ocr_image
+
+            return [Page(1, ocr_image(path), ocr_applied=True)]
         if backend == "glm":
             from cra.ingest.glm_ocr import GlmOcrClient
 
-            return [Page(p.number, p.text) for p in GlmOcrClient().parse(path).pages]
+            return [Page(p.number, p.text, ocr_applied=True) for p in GlmOcrClient().parse(path).pages]
         raise RuntimeError(NO_OCR_MSG)
     return load_pdf_text(path, use_ocr)
