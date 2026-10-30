@@ -86,7 +86,14 @@ async def require_service_secret(request: Request, call_next):
         return JSONResponse(status_code=401, content={"detail": "无效的 CRA 服务凭证"})
     return await call_next(request)
 
-RUNTIME = ROOT / "runtime"
+# Vercel Functions expose a read-only deployment bundle and a writable /tmp.
+# Keep local development on the repository runtime directory while making
+# serverless instances safe to cold-start. Durable records remain in
+# PostgreSQL and original uploads remain in the managed object store.
+RUNTIME = Path(
+    os.environ.get("CRA_RUNTIME_DIR")
+    or ("/tmp/cra-runtime" if os.environ.get("VERCEL") else ROOT / "runtime")
+)
 UPLOADS = RUNTIME / "uploads"
 FINANCIAL_REPORTS = UPLOADS / "financial-reports"
 KNOWLEDGE_SOURCES = RUNTIME / "knowledge-sources"
