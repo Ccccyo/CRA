@@ -7,9 +7,7 @@ import {
   IconCheck,
   IconEye,
   IconEyeOff,
-  IconFileAnalytics,
   IconLoader2,
-  IconLock,
   IconLogout,
 } from '@tabler/icons-react';
 import { useLocale, useTranslations } from 'next-intl';
@@ -44,16 +42,19 @@ type FieldErrors = {
 const demoAccounts = [
   {
     email: 'admin@example.com',
+    password: 'adminadmin',
     titleKey: 'demo_admin_title',
     permissionKey: 'demo_admin_permissions',
   },
   {
     email: 'analyst@example.com',
+    password: 'analystanalyst',
     titleKey: 'demo_analyst_title',
     permissionKey: 'demo_analyst_permissions',
   },
   {
     email: 'reviewer@example.com',
+    password: 'reviewerreviewer',
     titleKey: 'demo_reviewer_title',
     permissionKey: 'demo_reviewer_permissions',
   },
@@ -204,102 +205,14 @@ export function SignIn({
   };
 
   return (
-    <div className="border-border bg-card text-card-foreground mx-auto grid w-full max-w-[1120px] overflow-hidden rounded-xl border lg:min-h-[640px] lg:grid-cols-[1.08fr_0.92fr]">
-      <section className="bg-accent/55 order-2 flex flex-col px-6 py-8 md:px-9 lg:order-1 lg:px-12 lg:py-11">
-        <div className="hidden lg:block">
-          <h2 className="text-foreground max-w-[12ch] text-[2.5rem] leading-[1.12] font-semibold tracking-[-0.035em]">
-            {t('workspace_sign_in_title')}
-          </h2>
-          <p className="text-muted-foreground mt-5 max-w-[56ch] text-sm leading-6">
-            {t('workspace_sign_in_description')}
-          </p>
-          <div className="border-border text-foreground/75 mt-8 flex items-center gap-3 border-y py-4 text-xs font-medium">
-            <IconFileAnalytics size={18} stroke={1.7} />
-            <span>{t('workflow_summary')}</span>
-          </div>
-        </div>
-
-        <div className="lg:mt-auto">
-          {isEmailAuthEnabled ? (
-            <>
-              <div className="mb-4">
-                <h3 className="text-foreground text-sm font-semibold">
-                  {t('demo_accounts_title')}
-                </h3>
-                <p className="text-muted-foreground mt-1 text-xs leading-5">
-                  {t('demo_accounts_description')}
-                </p>
-              </div>
-
-              <div className="divide-border border-border divide-y border-y">
-                {demoAccounts.map((account) => {
-                  const selected = email.trim().toLowerCase() === account.email;
-                  return (
-                    <button
-                      key={account.email}
-                      type="button"
-                      aria-pressed={selected}
-                      disabled={interactionBlocked}
-                      onClick={() => chooseDemoAccount(account.email)}
-                      className="group hover:bg-card/70 focus-visible:bg-card focus-visible:ring-ring flex min-h-14 w-full items-center gap-4 py-3.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-55"
-                    >
-                      <span
-                        className={cn(
-                          'grid size-8 shrink-0 place-items-center rounded-lg border text-xs font-semibold transition-colors',
-                          selected
-                            ? 'border-primary bg-primary text-primary-foreground'
-                            : 'border-border bg-card text-muted-foreground'
-                        )}
-                      >
-                        {selected ? (
-                          <IconCheck size={16} />
-                        ) : (
-                          account.email[0].toUpperCase()
-                        )}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-baseline gap-x-2">
-                          <strong className="text-foreground text-sm font-semibold">
-                            {t(account.titleKey)}
-                          </strong>
-                          <span className="text-muted-foreground text-xs">
-                            {account.email}
-                          </span>
-                        </span>
-                        <span className="text-foreground/75 mt-0.5 block text-xs leading-5">
-                          {t(account.permissionKey)}
-                        </span>
-                      </span>
-                      <IconArrowRight
-                        size={17}
-                        stroke={1.7}
-                        className="text-muted-foreground group-hover:text-primary shrink-0 transition-transform group-hover:translate-x-0.5"
-                      />
-                    </button>
-                  );
-                })}
-              </div>
-
-              <p className="text-muted-foreground mt-4 flex items-start gap-2 text-xs leading-5">
-                <IconLock size={15} stroke={1.8} className="mt-0.5 shrink-0" />
-                {t('permissions_follow_account')}
-              </p>
-            </>
-          ) : (
-            <p className="border-border text-muted-foreground border-y py-4 text-xs leading-5">
-              {t('email_auth_unavailable')}
-            </p>
-          )}
-        </div>
-      </section>
-
-      <section className="order-1 flex items-center px-6 py-10 md:px-12 lg:order-2 lg:px-14">
+    <div className="border-border bg-card text-card-foreground mx-auto grid w-full max-w-[920px] overflow-hidden rounded-xl border lg:grid-cols-[1.05fr_0.95fr]">
+      <section className="flex items-center px-6 py-9 md:px-10 lg:px-12 lg:py-12">
         <div className="w-full">
-          <div className="mb-8">
-            <h1 className="text-foreground text-3xl font-semibold tracking-[-0.03em]">
+          <div className="mb-7">
+            <h1 className="text-foreground text-2xl font-semibold tracking-[-0.025em] md:text-3xl">
               {t('sign_in_heading')}
             </h1>
-            <p className="text-muted-foreground mt-3 text-sm leading-6">
+            <p className="text-muted-foreground mt-2 text-sm leading-6">
               {t('sign_in_description')}
             </p>
           </div>
@@ -476,19 +389,87 @@ export function SignIn({
             )}
 
             {isEmailAuthEnabled && (
-              <div className="border-border border-t pt-5">
-                <p className="text-muted-foreground text-center text-xs">
-                  {t('no_account')}
-                  <Link
-                    href="/sign-up"
-                    className="text-primary decoration-primary/35 hover:decoration-primary ml-1 font-medium underline underline-offset-4"
-                  >
-                    {t('sign_up_title')}
-                  </Link>
-                </p>
-              </div>
+              <p className="text-muted-foreground text-center text-xs">
+                {t('no_account')}
+                <Link
+                  href="/sign-up"
+                  className="text-primary decoration-primary/35 hover:decoration-primary ml-1 font-medium underline underline-offset-4"
+                >
+                  {t('sign_up_title')}
+                </Link>
+              </p>
             )}
           </div>
+        </div>
+      </section>
+
+      <section className="border-border bg-muted/35 border-t px-6 py-7 md:px-10 lg:border-t-0 lg:border-l lg:px-9 lg:py-12">
+        <div>
+          {isEmailAuthEnabled ? (
+            <>
+              <div className="mb-3">
+                <h3 className="text-foreground text-sm font-semibold">
+                  {t('demo_accounts_title')}
+                </h3>
+              </div>
+
+              <div className="divide-border border-border divide-y border-y">
+                {demoAccounts.map((account) => {
+                  const selected = email.trim().toLowerCase() === account.email;
+                  return (
+                    <button
+                      key={account.email}
+                      type="button"
+                      aria-pressed={selected}
+                      disabled={interactionBlocked}
+                      onClick={() => chooseDemoAccount(account.email)}
+                      className={cn(
+                        'group focus-visible:bg-card focus-visible:ring-ring flex min-h-16 w-full items-center gap-3 px-2 py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-55',
+                        selected ? 'bg-card' : 'hover:bg-card/65'
+                      )}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-baseline justify-between gap-x-2">
+                          <strong className="text-foreground text-sm font-semibold">
+                            {t(account.titleKey)}
+                          </strong>
+                          <span className="text-muted-foreground text-xs">
+                            {account.email}
+                          </span>
+                        </span>
+                        <span className="text-foreground/75 mt-0.5 block text-xs leading-5">
+                          {t(account.permissionKey)}
+                        </span>
+                        <span className="text-muted-foreground mt-1 block text-xs leading-5">
+                          {t('demo_password_label')}
+                          <span className="text-foreground ml-1 font-medium">
+                            {account.password}
+                          </span>
+                        </span>
+                      </span>
+                      {selected ? (
+                        <IconCheck
+                          size={17}
+                          stroke={1.8}
+                          className="text-primary shrink-0"
+                        />
+                      ) : (
+                        <IconArrowRight
+                          size={17}
+                          stroke={1.7}
+                          className="text-muted-foreground group-hover:text-primary shrink-0 transition-transform group-hover:translate-x-0.5"
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <p className="border-border text-muted-foreground border-y py-4 text-xs leading-5">
+              {t('email_auth_unavailable')}
+            </p>
+          )}
         </div>
       </section>
     </div>
