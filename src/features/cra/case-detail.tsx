@@ -22,6 +22,7 @@ import {
   IconDeviceFloppy,
   IconDownload,
   IconEye,
+  IconExternalLink,
   IconFileSpreadsheet,
   IconFileText,
   IconFlask,
@@ -32,7 +33,6 @@ import {
   IconPencil,
   IconPlayerPlay,
   IconRefresh,
-  IconRobot,
   IconSend,
   IconShieldCheck,
   IconSparkles,
@@ -68,16 +68,15 @@ const stageAliases: Record<string, string[]> = {
   resolve_entity: ['resolve_entity'],
   financial_evidence: ['financial_evidence', 'financial_signoff'],
   risk_signoff: ['retrieve_context', 'risk_signoff'],
-  write_workbook: ['write_workbook'],
+  write_workbook: ['external_score', 'write_workbook'],
   final_signoff: ['final_signoff', 'completed'],
 };
 
 function visibleStage(stage: string) {
   if (stage === 'financial_signoff') return 'financial_evidence';
   if (stage === 'retrieve_context') return 'risk_signoff';
-  if (stage === 'completed' || stage === 'external_score') {
-    return 'final_signoff';
-  }
+  if (stage === 'external_score') return 'write_workbook';
+  if (stage === 'completed') return 'final_signoff';
   if (stage === 'intake_excel') return 'resolve_entity';
   return stage;
 }
@@ -110,6 +109,37 @@ const qualitativeLabels: Record<string, string> = {
   company_type: '企业类型',
   sovereign_rating: '国家风险档位',
   customer_distinction: '客户重要性',
+};
+
+const scoreGroupLabels: Record<string, string> = {
+  'LIQ 41%': '偿债能力 41%',
+  'LVG 19%': '杠杆水平 19%',
+  'PROF 37%': '盈利能力 37%',
+  'Quality 3%': '财报质量 3%',
+  '定性 30%': '定性因素',
+};
+
+const riskClassLabels: Record<string, string> = {
+  '00 Minimal': '00 极低风险',
+  '01 Low': '01 低风险',
+  '02 Low to Moderate': '02 较低至中等风险',
+  '03 Moderate': '03 中等风险',
+  '04 High': '04 高风险',
+  '05 Very High': '05 极高风险',
+};
+
+function scoreMetricLabel(metric: unknown) {
+  const value = String(metric || '—');
+  if (qualitativeLabels[value]) return qualitativeLabels[value];
+  if (value.startsWith('D&B 评级')) return value.replace('D&B 评级', 'D&B 信用评级');
+  return value;
+}
+
+const qualitativeSourceLabels: Record<string, string> = {
+  pay_habits: '来源：当前客户 SAP 应收与收款记录（近 12 个月）',
+  company_type: '来源：审计报告、上市状态或已核验工商资料',
+  sovereign_rating: '来源：评审日有效的公司国家风险映射',
+  customer_distinction: '来源：销售或客户主数据中的已确认分类',
 };
 
 const financialLabels: Record<string, string> = {
@@ -147,6 +177,7 @@ type ChatSource = {
   id: string;
   citation: string;
   text?: string;
+  url?: string;
 };
 
 type ChatMessage = {
@@ -234,22 +265,16 @@ function chatSourcePresentation(source: ChatSource) {
   };
 }
 
-function displayCitationMarkers(text: string, sources: RiskSource[]) {
-  const sourceOrder = new Map(
-    sources.map((source, index) => [source.id, index + 1])
-  );
-  return text.replace(/\[(S\d+)\]/g, (marker, sourceId: string) => {
-    const order = sourceOrder.get(sourceId);
-    return order ? `[依据 ${order}]` : marker;
-  });
+function stripCitationMarkers(text: string) {
+  return text
+    .replace(/【初步意见】/g, '【审查建议】')
+    .replace(/\s*\[(?:S\d+|依据\s*\d+)\]/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
 }
 
-function storeCitationMarkers(text: string, sources: RiskSource[]) {
-  return text.replace(/\[依据\s*(\d+)\]/g, (marker, rawOrder: string) => {
-    const source = sources[Number(rawOrder) - 1];
-    return source ? `[${source.id}]` : marker;
-  });
-}
+const demoChatQuestion =
+  '查询 LEI 529900T8BM49AURSDO55，并判断是否与本案客户一致';
 
 function ChatAnswerText({
   text,
@@ -580,6 +605,8 @@ function FinancialReview({
         filename?: string;
         stored_filename?: string;
         pages_used?: unknown[];
+        assumptions?: string[];
+        balance_check?: string;
       }
     | undefined;
   return (
@@ -592,12 +619,24 @@ function FinancialReview({
       {source?.type === 'demo' && (
         <div className="mb-4 flex gap-3 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900 ring-1 ring-amber-200">
           <IconFlask size={17} className="mt-0.5 shrink-0" />
-          <p>
-            <span className="font-semibold">演示数据：</span>
-            {source.warning || '该数据不是客户正式财报，仅用于验证产品流程。'}
-            演示值由历史 SAP
-            数据生成，没有对应的财报原页，因此不会标为高置信度。
-          </p>
+          <div>
+            <p>
+              <span className="font-semibold">模拟财报：</span>
+              {source.warning || '该数据不是客户正式财报，仅用于验证产品流程。'}
+              各科目按不同经营假设生成，没有对应的财报原页，因此不会标为高置信度。
+              {source.balance_check === 'passed' && ' 资产负债表勾稽已通过。'}
+            </p>
+            {Array.isArray(source.assumptions) && source.assumptions.length > 0 && (
+              <details className="mt-2">
+                <summary className="cursor-pointer font-semibold">查看模拟假设</summary>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                  {source.assumptions.map((assumption) => (
+                    <li key={assumption}>{assumption}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
         </div>
       )}
       {source?.type === 'report' && (
@@ -805,10 +844,10 @@ function RiskReview({
     [item.notes.risk_sources]
   );
   const [companyDescription, setCompanyDescription] = useState(
-    displayCitationMarkers(String(draft.company_description || ''), sources)
+    stripCitationMarkers(String(draft.company_description || ''))
   );
   const [riskComments, setRiskComments] = useState(
-    displayCitationMarkers(String(draft.risk_comments || ''), sources)
+    stripCitationMarkers(String(draft.risk_comments || ''))
   );
   const [qualitative, setQualitative] = useState<
     Record<string, { choice: string; reason: string }>
@@ -818,11 +857,9 @@ function RiskReview({
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setCompanyDescription(
-      displayCitationMarkers(String(draft.company_description || ''), sources)
+      stripCitationMarkers(String(draft.company_description || ''))
     );
-    setRiskComments(
-      displayCitationMarkers(String(draft.risk_comments || ''), sources)
-    );
+    setRiskComments(stripCitationMarkers(String(draft.risk_comments || '')));
     setQualitative(draft.qualitative || {});
   }, [
     draft.company_description,
@@ -835,30 +872,28 @@ function RiskReview({
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const opinion = {
-    company_description: storeCitationMarkers(companyDescription, sources),
-    risk_comments: storeCitationMarkers(riskComments, sources),
+    company_description: stripCitationMarkers(companyDescription),
+    risk_comments: stripCitationMarkers(riskComments),
     stance: draft.stance || '',
     qualitative,
   };
   const dirty =
     companyDescription !==
-      displayCitationMarkers(
-        String(draft.company_description || ''),
-        sources
-      ) ||
-    riskComments !==
-      displayCitationMarkers(String(draft.risk_comments || ''), sources) ||
+      stripCitationMarkers(String(draft.company_description || '')) ||
+    riskComments !== stripCitationMarkers(String(draft.risk_comments || '')) ||
     JSON.stringify(qualitative) !== JSON.stringify(draft.qualitative || {});
   const complete =
     companyDescription.trim() &&
     riskComments.trim() &&
-    Object.keys(qualitativeOptions).every((key) => qualitative[key]?.choice);
+    Object.keys(qualitativeOptions).every(
+      (key) => qualitative[key]?.choice && qualitative[key]?.reason?.trim()
+    );
   return (
     <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:p-6">
       <PanelHeader
         eyebrow={signable ? '需要你的判断' : '案件核心产物'}
         title="风险意见"
-        description="请结合已签署的财务证据与评审依据复核草稿。定性项会回填 Excel，综合分与 Risk Category 仍由原宏 / SAP 计算。"
+        description="本步骤确认风险立场、关键风险和进入评分前的条件；数字额度由签署后的确定性评分生成。"
       />
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
         <div className="flex items-center gap-2 text-xs text-slate-600">
@@ -878,6 +913,31 @@ function RiskReview({
         >
           {complete ? '已具备签署条件' : '尚有必填项未完成'}
         </span>
+      </div>
+      <div className="mb-5 grid overflow-hidden rounded-xl border border-slate-200 bg-white sm:grid-cols-3">
+        {[
+          ['本步建议', draft.stance || '待评估'],
+          ['申请额度', money(item.requested_cl_usd)],
+          [
+            '数字额度建议',
+            item.notes.score_result
+              ? money(
+                  Number(
+                    (item.notes.score_result as Record<string, unknown>)
+                      .suggested_limit_usd || 0
+                  )
+                )
+              : '签署后由规则评分生成',
+          ],
+        ].map(([label, value]) => (
+          <div
+            key={label}
+            className="border-b border-slate-200 px-4 py-3 last:border-b-0 sm:border-r sm:border-b-0 sm:last:border-r-0"
+          >
+            <p className="text-[10px] text-slate-500">{label}</p>
+            <p className="mt-1 text-sm font-semibold text-slate-950">{value}</p>
+          </div>
+        ))}
       </div>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <article className="min-w-0 divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
@@ -935,6 +995,9 @@ function RiskReview({
                     className="pt-2 text-xs font-semibold text-slate-700"
                   >
                     {qualitativeLabels[key]}
+                    <span className="mt-1 block text-[10px] leading-4 font-normal text-slate-500">
+                      {qualitativeSourceLabels[key]}
+                    </span>
                   </label>
                   <div>
                     <select
@@ -959,14 +1022,21 @@ function RiskReview({
                         </option>
                       ))}
                     </select>
-                    <p className="mt-1.5 text-[10px] leading-4 text-slate-500">
-                      {qualitative[key]?.reason
-                        ? displayCitationMarkers(
-                            qualitative[key].reason,
-                            sources
-                          )
-                        : '尚无已核验理由'}
-                    </p>
+                    <Textarea
+                      value={stripCitationMarkers(qualitative[key]?.reason || '')}
+                      onChange={(event) =>
+                        setQualitative((current) => ({
+                          ...current,
+                          [key]: {
+                            choice: current[key]?.choice || '',
+                            reason: event.target.value,
+                          },
+                        }))
+                      }
+                      disabled={!editable || acting}
+                      placeholder="填写本项判断依据；缺少材料时不要选择档位"
+                      className="mt-2 min-h-16 resize-y border-slate-200 bg-slate-50 text-[11px] leading-5 text-slate-700"
+                    />
                   </div>
                 </div>
               ))}
@@ -978,7 +1048,7 @@ function RiskReview({
                 htmlFor="risk-comments"
                 className="text-sm font-semibold text-slate-950"
               >
-                授信风险意见
+                风险意见正文
               </label>
               <span className="text-[10px] text-slate-400">
                 {riskComments.length} 字
@@ -992,8 +1062,7 @@ function RiskReview({
               className="min-h-72 resize-y border-slate-300 bg-white text-sm leading-6 text-slate-800"
             />
             <p className="mt-2 text-[10px] text-slate-500">
-              必须覆盖偿债能力、杠杆、盈利能力、付款记录和国家风险；“依据
-              1”等标记与右侧来源一一对应，保存时请保留。
+              正文只写判断、风险和条件，不写来源编号；相关材料统一在右侧查看。
             </p>
           </div>
         </article>
@@ -1001,24 +1070,28 @@ function RiskReview({
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <IconDatabase size={17} className="text-blue-700" />
-              <h3 className="text-xs font-semibold text-slate-950">评审依据</h3>
+              <h3 className="text-xs font-semibold text-slate-950">参考材料</h3>
             </div>
             <span className="text-[10px] text-slate-500">
               {sources.length} 条
             </span>
           </div>
           <p className="mb-3 text-[11px] leading-5 text-slate-500">
-            此处只显示本意见实际引用的材料；展开可查看原文片段。
+            与本次草稿相关的材料集中放在这里，正文不再插入编号。
           </p>
           <div className="max-h-[560px] space-y-2 overflow-y-auto pr-1">
-            {sources.map((source, index) => (
+            {sources.map((source) => (
               <details
                 key={source.id}
                 className="group rounded-lg bg-white ring-1 ring-slate-200"
               >
                 <summary className="flex cursor-pointer list-none items-start gap-2 px-3 py-3">
                   <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
-                    依据 {index + 1}
+                    {source.source_type === 'case_evidence'
+                      ? '本案'
+                      : source.source_type === 'policy'
+                        ? '制度'
+                        : '参考'}
                   </span>
                   <span className="min-w-0 flex-1 text-[11px] leading-4 font-medium text-slate-800">
                     {source.citation}
@@ -1112,11 +1185,37 @@ function WorkbookReview({
   task?: HumanTask;
   acting: boolean;
   onRun: () => void;
-  onConfirm: () => void;
+  onConfirm: (resolution: Record<string, unknown>) => void;
   canApprove: boolean;
   canRun?: boolean;
 }) {
-  const generated = Boolean(item.notes.export_path);
+  const score = (item.notes.score_result || {}) as Record<string, unknown>;
+  const artifact = (item.notes.current_artifact || {}) as Record<
+    string,
+    unknown
+  >;
+  const suggestedLimit = Number(score.suggested_limit_usd || 0);
+  const requestedLimit = Number(
+    score.requested_limit_usd || item.requested_cl_usd || 0
+  );
+  const [finalLimit, setFinalLimit] = useState(String(suggestedLimit || ''));
+  const [deviationReason, setDeviationReason] = useState('');
+  const finalLimitNumber = Number(finalLimit);
+  const deviation = Number.isFinite(finalLimitNumber)
+    ? finalLimitNumber - suggestedLimit
+    : 0;
+  const finalReviewReady =
+    finalLimit.trim() !== '' &&
+    Number.isFinite(finalLimitNumber) &&
+    finalLimitNumber >= 0 &&
+    Boolean(score.method) &&
+    Boolean(score.approval_level) &&
+    Boolean(artifact.checksum) &&
+    (Math.abs(deviation) <= 0.01 || Boolean(deviationReason.trim()));
+  const generated = Boolean(item.notes.current_artifact);
+  const calculationTrace = Array.isArray(score.calculation_trace)
+    ? (score.calculation_trace as Array<Record<string, unknown>>)
+    : [];
   if (!generated) {
     return (
       <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:p-6">
@@ -1186,16 +1285,135 @@ function WorkbookReview({
           className="shrink-0 rounded-xl bg-white text-emerald-800"
         />
       </div>
-      {task && canApprove && (
-        <div className="mt-5 flex justify-end">
-          <Button
-            onClick={onConfirm}
-            disabled={acting}
-            className="rounded-xl bg-blue-700 hover:bg-blue-800"
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          ['申请额度', money(requestedLimit)],
+          ['系统建议额度', money(suggestedLimit)],
+          ['计算方法', String(score.method || '—')],
+          ['审批等级', String(score.approval_level || '—')],
+        ].map(([label, value]) => (
+          <div
+            key={label}
+            className="rounded-xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200"
           >
-            {acting ? <IconLoader2 className="animate-spin" /> : <IconCheck />}{' '}
-            完成最终复核
-          </Button>
+            <p className="text-xs text-slate-500">{label}</p>
+            <p className="mt-1 text-sm font-semibold text-slate-900">{value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div className="grid gap-3 sm:grid-cols-4">
+          {[
+          ['财务风险分（70%）', String(score.financial_score ?? '—')],
+          ['定性风险分（30%）', String(score.qualitative_score ?? '—')],
+          ['综合风险分', String(score.overall_score ?? '—')],
+          [
+            '风险等级',
+            riskClassLabels[String(score.risk_class || '')] ||
+              String(score.risk_class || '—'),
+          ],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <p className="text-[10px] text-slate-500">{label}</p>
+              <p className="mt-1 text-sm font-semibold text-slate-950">{value}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-xs leading-5 text-slate-600">
+          本 Demo 风险分范围为 1–6，1 表示较低风险，6 表示较高风险。结果由版本化规则
+          mock-score-v1 计算，不由大模型生成。综合风险分 = 70% × 财务风险分 + 30% ×
+          定性风险分；建议额度再按净资产基础、风险等级和汇率计算。
+        </p>
+        <details className="mt-3 rounded-lg bg-white ring-1 ring-slate-200">
+          <summary className="cursor-pointer px-3 py-2.5 text-xs font-semibold text-slate-800">
+            查看逐项计算依据
+          </summary>
+          <div className="overflow-x-auto border-t border-slate-200">
+            <table className="w-full min-w-[560px] text-left text-xs">
+              <thead className="bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 font-medium">分组</th>
+                  <th className="px-3 py-2 font-medium">指标</th>
+                  <th className="px-3 py-2 font-medium">计算值</th>
+                  <th className="px-3 py-2 font-medium">风险分（1低–6高）</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {calculationTrace.map((row, index) => (
+                  <tr key={`${String(row['指标'])}-${index}`}>
+                    <td className="px-3 py-2 text-slate-600">
+                      {scoreGroupLabels[String(row['分组'] || '')] ||
+                        String(row['分组'] || '—')}
+                    </td>
+                    <td className="px-3 py-2 font-medium text-slate-800">
+                      {scoreMetricLabel(row['指标'])}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600">{row['数值'] == null ? '不适用' : String(row['数值'])}</td>
+                    <td className="px-3 py-2 font-semibold text-slate-900">{String(row['得分'] ?? '—')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+      {task && canApprove && (
+        <div className="mt-5 space-y-4 rounded-xl bg-blue-50 p-4 ring-1 ring-blue-200">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-2 text-sm font-medium text-slate-800">
+              最终额度（USD）
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={finalLimit}
+                onChange={(event) => setFinalLimit(event.target.value)}
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+            <div className="rounded-lg bg-white px-4 py-3 text-sm ring-1 ring-blue-200">
+              <p className="text-xs text-slate-500">相对建议额度偏离</p>
+              <p className="mt-1 font-semibold text-slate-900">
+                {money(deviation)}
+              </p>
+            </div>
+          </div>
+          {Math.abs(deviation) > 0.01 && (
+            <label className="block space-y-2 text-sm font-medium text-slate-800">
+              偏离原因（必填）
+              <Textarea
+                value={deviationReason}
+                onChange={(event) => setDeviationReason(event.target.value)}
+                placeholder="说明偏离系统建议额度的业务依据与责任判断"
+                className="min-h-24 bg-white font-normal"
+              />
+            </label>
+          )}
+          <p className="text-xs leading-5 text-blue-900">
+            签署将绑定当前交付文件校验和、评分方法和审批等级；上游材料或意见变化后自动失效。
+          </p>
+          <div className="flex justify-end">
+            <Button
+              onClick={() =>
+                onConfirm({
+                  final_limit_usd: finalLimitNumber,
+                  method: score.method,
+                  approval_level: score.approval_level,
+                  deviation_reason: deviationReason.trim(),
+                  artifact_checksum: artifact.checksum,
+                })
+              }
+              disabled={acting || !finalReviewReady}
+              className="rounded-xl bg-blue-700 hover:bg-blue-800"
+            >
+              {acting ? (
+                <IconLoader2 className="animate-spin" />
+              ) : (
+                <IconCheck />
+              )}{' '}
+              完成最终复核
+            </Button>
+          </div>
         </div>
       )}
       {task && !canApprove && (
@@ -1224,7 +1442,9 @@ function RunningStep({
     financial_evidence:
       '系统将读取当期财报，抽取 21 个财务字段，并保留页码与原文。',
     retrieve_context:
-      '系统将检索内部规则、历史案件与公开资料，生成带引用的风险意见草稿。',
+      '系统将检索内部规则、历史案件与公开资料，生成可追溯的风险意见草稿；来源统一放在材料区。',
+    external_score:
+      '系统将使用已签署的财务数据和定性判断执行确定性规则，生成建议额度与审批层级。',
   };
   return (
     <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:p-6">
@@ -1260,6 +1480,39 @@ function RunningStep({
   );
 }
 
+function explainFinancialBlocker(
+  badCase: CraCase['bad_cases'][number] | undefined
+) {
+  if (!badCase) return null;
+  const signal = `${badCase.failure_type} ${badCase.detection_source} ${badCase.response}`;
+
+  if (/数量级|单位|原页/.test(signal)) {
+    return {
+      summary: '系统发现现有财务数据可能存在单位或字段错误，因此暂停回填。',
+      issue: '财务数据与历史记录的数量级不一致。',
+      impact:
+        '可能是元、千元或百万的单位差异，也可能选错了科目。继续处理会造成金额错误。',
+      action: '上传原始财报，核对对应科目、数字和报表单位。',
+    };
+  }
+
+  if (/缺失|缺少|未上传/.test(signal)) {
+    return {
+      summary: '当前缺少可核对的本期财务报告，因此暂停处理。',
+      issue: '没有本期财报原页，现有数据无法完成核验。',
+      impact: '数字、期间和单位没有原始依据，不能进入签署和回填。',
+      action: '上传本期正式财报；系统会定位原页并重新校验字段。',
+    };
+  }
+
+  return {
+    summary: '系统发现材料存在需要人工确认的问题，因此暂停处理。',
+    issue: badCase.failure_type || '当前材料未通过校验。',
+    impact: '继续处理可能把未经核对的数据带入风险意见和 Excel。',
+    action: '根据页面提示补充或核对材料，完成后重新执行当前步骤。',
+  };
+}
+
 function BlockedFinancials({
   item,
   acting,
@@ -1281,6 +1534,7 @@ function BlockedFinancials({
   const activeBadCase = item.bad_cases?.find(
     (badCase) => badCase.status === 'open'
   );
+  const blockerCopy = explainFinancialBlocker(activeBadCase);
   const chooseFile = (next: File | null) => {
     if (!next) return;
     if (!next.name.toLowerCase().endsWith('.pdf')) {
@@ -1306,28 +1560,47 @@ function BlockedFinancials({
         eyebrow="第 02 步 · 财务证据"
         title="上传当期财务报告"
         description={
+          blockerCopy?.summary ||
           item.workflow.blocker ||
           '上传正式财报后，系统会定位报表页、抽取字段并交给你逐项签署。'
         }
       />
       {activeBadCase && (
-        <div className="mb-5 grid gap-3 rounded-xl bg-red-50 p-4 text-xs text-red-900 ring-1 ring-red-200 sm:grid-cols-3">
-          <div>
-            <p className="text-red-500">分级</p>
-            <p className="mt-1 font-semibold">
-              {activeBadCase.priority} · {activeBadCase.exposure}/
-              {activeBadCase.impact}
-            </p>
-          </div>
-          <div>
-            <p className="text-red-500">发现方式</p>
-            <p className="mt-1 font-semibold">
-              {activeBadCase.detection_source}
-            </p>
-          </div>
-          <div>
-            <p className="text-red-500">处置</p>
-            <p className="mt-1 font-semibold">{activeBadCase.response}</p>
+        <div
+          role="alert"
+          className="mb-5 rounded-xl bg-red-50 p-4 text-red-950 ring-1 ring-red-200"
+        >
+          <div className="flex items-start gap-3">
+            <IconAlertTriangle
+              size={20}
+              className="mt-0.5 shrink-0 text-red-700"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">为什么暂停处理？</p>
+              <p className="mt-1 text-xs leading-5 text-red-900">
+                {blockerCopy?.summary}
+              </p>
+              <dl className="mt-4 grid gap-3 border-t border-red-200 pt-4 text-xs sm:grid-cols-3">
+                <div>
+                  <dt className="text-red-600">发现的问题</dt>
+                  <dd className="mt-1 leading-5 font-medium">
+                    {blockerCopy?.issue}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-red-600">为什么不能继续</dt>
+                  <dd className="mt-1 leading-5 font-medium">
+                    {blockerCopy?.impact}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-red-600">下一步</dt>
+                  <dd className="mt-1 leading-5 font-medium">
+                    {blockerCopy?.action}
+                  </dd>
+                </div>
+              </dl>
+            </div>
           </div>
         </div>
       )}
@@ -1470,7 +1743,7 @@ function BlockedFinancials({
               )}
               <p className="text-xs leading-5 text-blue-100">
                 {item.workflow.status === 'blocked'
-                  ? '如果暂时没有正式财报，可使用上期 SAP 数据生成明确标注的演示抽取。'
+                  ? '如果暂时没有正式财报，可使用上期数据生成可勾稽的模拟当期财报；收入、利润、营运资金和债务按不同假设变化。'
                   : '案件已经登记了财报材料时，可直接读取；上传新文件会替换本次抽取来源。'}
               </p>
             </div>
@@ -1485,7 +1758,7 @@ function BlockedFinancials({
                 <IconPlayerPlay />
               )}{' '}
               {item.workflow.status === 'blocked'
-                ? '使用演示数据继续'
+                ? '载入模拟财报'
                 : '读取已有材料'}
             </Button>
           </div>
@@ -1545,7 +1818,7 @@ function EvidenceSummary({ item }: { item: CraCase }) {
       {[
         ['主体材料', `${candidates.length} 个候选`, IconUserCheck],
         ['财务证据', `${values.length} / 21 字段`, IconShieldCheck],
-        ['RAG 引用', `${sources.length} 条来源`, IconDatabase],
+        ['评审依据', `${sources.length} 条来源`, IconDatabase],
       ].map(([title, value, Icon]) => (
         <div
           key={String(title)}
@@ -1580,16 +1853,16 @@ function CompletedStageView({
     snapshot?.title === `${snapshot?.stage} 已完成`;
   if (!snapshot || !snapshot.payload.notes || reconstructed) {
     return (
-      <section className="border-border bg-card rounded-xl border p-6 md:p-8">
+      <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200 md:p-8">
         <div className="mx-auto max-w-xl text-center">
           <span className="mx-auto grid size-11 place-items-center rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200">
             <IconHistory size={21} />
           </span>
-          <h2 className="text-foreground mt-4 text-lg font-semibold tracking-[-0.02em]">
-            该步骤没有可验证的历史快照
+          <h2 className="mt-4 text-lg font-semibold tracking-[-0.02em] text-slate-950">
+            该阶段没有可验证的历史快照
           </h2>
-          <p className="text-muted-foreground mt-2 text-sm leading-6">
-            这是启用步骤快照之前完成的旧案件。系统不会用当前数据冒充当时证据；从下一次流程流转开始，会在后台自动保存可回溯结果。
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            这是启用阶段快照前完成的旧案件。系统不会用当前数据代替历史结果；后续流转会自动保存可回看的阶段结果。
           </p>
         </div>
       </section>
@@ -1600,8 +1873,7 @@ function CompletedStageView({
   const historicalItem = { ...item, notes };
   const selectedEntity = notes.selected_entity as Candidate | undefined;
   const candidates = (notes.entity_candidates || []) as Candidate[];
-  const sources = (notes.risk_sources || []) as RiskSource[];
-  const completedAt = snapshot?.completed_at;
+  const completedAt = snapshot.completed_at;
 
   if (stage === 'financial_evidence') {
     return (
@@ -1643,30 +1915,29 @@ function CompletedStageView({
 
   if (stage === 'resolve_entity') {
     return (
-      <section className="border-border bg-card rounded-xl border p-5 md:p-6">
-        <h2 className="text-foreground text-lg font-semibold tracking-[-0.02em]">
+      <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:p-6">
+        <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-950">
           企业主体核验结果
         </h2>
-        <p className="text-muted-foreground mt-2 text-sm leading-6">
-          已核对 Excel 客户、SAP BP
-          与企业库候选。这里展示当时确认的主体和候选依据。
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          展示该阶段完成时确认的企业主体及候选核验范围。
         </p>
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <div className="bg-muted rounded-lg p-4">
-            <p className="text-muted-foreground text-xs">已确认主体</p>
-            <p className="text-foreground mt-1 text-sm font-semibold">
+          <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200">
+            <p className="text-xs text-slate-500">已确认主体</p>
+            <p className="mt-1 text-sm font-semibold text-slate-950">
               {selectedEntity?.name || '未记录确认主体'}
             </p>
-            <p className="text-muted-foreground mt-1 text-xs">
+            <p className="mt-1 text-xs text-slate-500">
               {selectedEntity?.entity_id || '—'}
             </p>
           </div>
-          <div className="bg-muted rounded-lg p-4">
-            <p className="text-muted-foreground text-xs">核验范围</p>
-            <p className="text-foreground mt-1 text-sm font-semibold">
+          <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200">
+            <p className="text-xs text-slate-500">核验范围</p>
+            <p className="mt-1 text-sm font-semibold text-slate-950">
               {candidates.length} 个候选 · BP {item.bp}
             </p>
-            <p className="text-muted-foreground mt-1 text-xs">
+            <p className="mt-1 text-xs text-slate-500">
               {selectedEntity?.address || item.customer.name || '—'}
             </p>
           </div>
@@ -1675,61 +1946,17 @@ function CompletedStageView({
     );
   }
 
-  if (stage === 'retrieve_context') {
-    return (
-      <section className="border-border bg-card rounded-xl border p-5 md:p-6">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 className="text-foreground text-lg font-semibold tracking-[-0.02em]">
-              规则与历史检索结果
-            </h2>
-            <p className="text-muted-foreground mt-2 text-sm leading-6">
-              风险意见使用的制度、公开资料和历史经验均保留引用，不重新执行检索。
-            </p>
-          </div>
-          <span className="text-muted-foreground text-xs tabular-nums">
-            {sources.length} 条来源
-          </span>
-        </div>
-        <div className="divide-border border-border mt-5 divide-y border-y">
-          {sources.map((source, index) => (
-            <div key={source.id} className="py-4">
-              <div className="flex items-start gap-3">
-                <span className="bg-primary/10 text-primary rounded-md px-2 py-1 text-xs font-semibold">
-                  依据 {index + 1}
-                </span>
-                <div className="min-w-0">
-                  <p className="text-foreground text-sm font-semibold break-words">
-                    {source.citation}
-                  </p>
-                  <p className="text-muted-foreground mt-1 line-clamp-3 text-xs leading-5">
-                    {source.text}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ))}
-          {!sources.length && (
-            <p className="text-muted-foreground py-8 text-center text-sm">
-              此阶段没有保存检索来源。
-            </p>
-          )}
-        </div>
-      </section>
-    );
-  }
-
   return (
-    <section className="border-border bg-card rounded-xl border p-5 md:p-6">
+    <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:p-6">
       <div className="flex items-start gap-3">
-        <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-700">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
           <IconCheck size={20} />
         </span>
         <div>
-          <h2 className="text-foreground text-lg font-semibold tracking-[-0.02em]">
+          <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-950">
             最终复核已完成
           </h2>
-          <p className="text-muted-foreground mt-2 text-sm leading-6">
+          <p className="mt-2 text-sm leading-6 text-slate-600">
             人工签署、证据版本和交付文件已归入案件审计记录。
             {completedAt ? ` 完成于 ${dateTime(completedAt)}。` : ''}
           </p>
@@ -1901,6 +2128,7 @@ function CaseChat({ item }: { item: CraCase }) {
               id: source.id || `S${index + 1}`,
               citation: source.citation || `来源 ${index + 1}`,
               text: source.text,
+              url: source.url,
             }))
             .filter((source) => source.citation)
         : Object.entries(result.sources || {}).map(([id, text]) => ({
@@ -1943,18 +2171,18 @@ function CaseChat({ item }: { item: CraCase }) {
           aria-expanded="false"
           aria-controls="case-assistant-panel"
           className="fixed right-4 bottom-4 z-40 flex h-14 items-center gap-3 rounded-2xl bg-blue-700 pr-4 pl-2.5 text-left text-white shadow-[0_18px_40px_-14px_rgba(29,78,216,.7)] transition duration-200 hover:-translate-y-0.5 hover:bg-blue-800 hover:shadow-[0_20px_44px_-14px_rgba(29,78,216,.78)] focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 focus-visible:outline-none md:right-7 md:bottom-7"
-          title="打开 CRA 案件问答助手"
+          title="打开案件帮助"
         >
           <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-white/15 ring-1 ring-white/20">
-            <IconRobot size={21} stroke={1.8} />
+            <IconFileText size={21} stroke={1.8} />
           </span>
           <span className="min-w-0 leading-none">
             <strong className="block text-sm font-semibold tracking-[-0.01em]">
-              CRA Bot
+              案件帮助
             </strong>
             <span className="mt-1 flex items-center gap-1.5 text-[10px] text-blue-100">
               <span className="size-1.5 rounded-full bg-emerald-300" />
-              案件问答助手
+              材料与规则查询
             </span>
           </span>
         </button>
@@ -1992,22 +2220,22 @@ function CaseChat({ item }: { item: CraCase }) {
                       setPanelPosition(null);
                     }
                   }}
-                  aria-label="移动问答助手；可拖动或使用方向键，Escape 复位"
-                  title="拖动移动问答助手"
+                  aria-label="移动案件帮助面板；可拖动或使用方向键，Escape 复位"
+                  title="拖动案件帮助面板"
                   className={`hidden size-8 shrink-0 touch-none place-items-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:outline-none md:grid ${draggingPanel ? 'cursor-grabbing bg-slate-100 text-slate-700' : 'cursor-grab'}`}
                 >
                   <IconGripVertical size={17} />
                 </button>
                 <span className="grid size-9 place-items-center rounded-xl bg-blue-50 text-blue-700">
-                  <IconRobot size={19} />
+                  <IconFileText size={19} />
                 </span>
                 <div className="min-w-0">
                   <h2 className="text-sm font-semibold text-slate-950">
-                    CRA Bot
+                    案件帮助
                   </h2>
                   <p className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-slate-500">
                     <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />
-                    案件问答助手 · 基于本案材料与知识库
+                    基于本案材料与规则
                   </p>
                 </div>
               </div>
@@ -2015,7 +2243,7 @@ function CaseChat({ item }: { item: CraCase }) {
                 type="button"
                 onClick={() => setOpen(false)}
                 className="grid size-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:outline-none"
-                aria-label="关闭案件助手"
+                aria-label="关闭案件帮助"
               >
                 <IconX size={18} />
               </button>
@@ -2026,7 +2254,7 @@ function CaseChat({ item }: { item: CraCase }) {
             >
               <div className="flex items-start gap-2.5">
                 <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-blue-700 text-white">
-                  <IconRobot size={15} />
+                  <IconFileText size={15} />
                 </span>
                 <div className="max-w-[86%] rounded-2xl rounded-tl-md bg-white px-3.5 py-3 text-xs leading-5 text-slate-700 ring-1 ring-slate-200">
                   {wf.status === 'blocked'
@@ -2047,10 +2275,12 @@ function CaseChat({ item }: { item: CraCase }) {
                 ) : (
                   <div key={message.id} className="flex items-start gap-2.5">
                     <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-blue-700 text-white">
-                      <IconRobot size={15} />
+                      <IconFileText size={15} />
                     </span>
                     <div className="max-w-[86%] rounded-2xl rounded-tl-md bg-white px-3.5 py-3 text-xs leading-5 text-slate-700 ring-1 ring-slate-200">
-                      <p className="whitespace-pre-wrap">{message.text}</p>
+                      <p className="whitespace-pre-wrap">
+                        {stripCitationMarkers(message.text)}
+                      </p>
                       {!!message.sources?.length && (
                         <details className="group mt-3 border-t border-slate-200 pt-2.5">
                           <summary className="flex min-h-8 cursor-pointer list-none items-center gap-2 rounded-lg px-1 text-[11px] font-medium text-slate-600 transition-colors outline-none hover:text-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500/30 [&::-webkit-details-marker]:hidden">
@@ -2073,9 +2303,6 @@ function CaseChat({ item }: { item: CraCase }) {
                             className="mt-2 overflow-hidden rounded-lg border border-slate-200 bg-white"
                             aria-label="本次回答依据"
                           >
-                            <li className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-[10px] leading-4 text-slate-500">
-                              回答中的蓝色「依据 1」与下方同序号材料一一对应。
-                            </li>
                             {message.sources.map((source, index) => {
                               const evidence = normalizeChatSource(
                                 source,
@@ -2096,9 +2323,27 @@ function CaseChat({ item }: { item: CraCase }) {
                                       <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500">
                                         {presentation.scope}
                                       </span>
-                                      <p className="truncate text-[11px] font-semibold text-slate-800">
-                                        {presentation.title}
-                                      </p>
+                                      {evidence.url?.startsWith('https://') ? (
+                                        <a
+                                          href={evidence.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="flex min-w-0 items-center gap-1 text-[11px] font-semibold text-blue-700 hover:underline hover:underline-offset-2 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none"
+                                        >
+                                          <span className="truncate">
+                                            {presentation.title}
+                                          </span>
+                                          <IconExternalLink
+                                            size={12}
+                                            className="shrink-0"
+                                            aria-hidden="true"
+                                          />
+                                        </a>
+                                      ) : (
+                                        <p className="truncate text-[11px] font-semibold text-slate-800">
+                                          {presentation.title}
+                                        </p>
+                                      )}
                                     </div>
                                     <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">
                                       {presentation.description}
@@ -2117,7 +2362,7 @@ function CaseChat({ item }: { item: CraCase }) {
               {chatting && (
                 <div className="flex items-start gap-2.5">
                   <span className="grid size-7 place-items-center rounded-lg bg-blue-700 text-white">
-                    <IconRobot size={15} />
+                    <IconFileText size={15} />
                   </span>
                   <div className="flex gap-1 rounded-2xl bg-white px-4 py-3 ring-1 ring-slate-200">
                     {[0, 1, 2].map((dot) => (
@@ -2134,21 +2379,30 @@ function CaseChat({ item }: { item: CraCase }) {
             </div>
             <div className="shrink-0 border-t border-slate-200 bg-white p-3">
               {!messages.length && (
-                <div className="mb-3 flex gap-2 overflow-x-auto [scrollbar-width:none]">
-                  {[
-                    '为什么停在这里？',
-                    '我需要确认什么？',
-                    '用了哪些 RAG 资料？',
-                  ].map((suggestion) => (
-                    <button
-                      key={suggestion}
-                      type="button"
-                      onClick={() => setQuestion(suggestion)}
-                      className="shrink-0 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100"
-                    >
-                      {suggestion}
-                    </button>
-                  ))}
+                <div className="mb-3 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setQuestion(demoChatQuestion)}
+                    className="w-full rounded-lg bg-blue-50 px-3 py-2 text-left text-[11px] text-blue-900 ring-1 ring-blue-200 transition-colors hover:bg-blue-100 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none"
+                  >
+                    核验外部 LEI 是否与本案客户一致
+                  </button>
+                  <div className="flex gap-2 overflow-x-auto [scrollbar-width:none]">
+                    {[
+                      '为什么停在这里？',
+                      '我需要确认什么？',
+                      '使用了哪些评审资料？',
+                    ].map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => setQuestion(suggestion)}
+                        className="shrink-0 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600 ring-1 ring-slate-200 hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
               <form onSubmit={ask} className="flex items-end gap-2">
@@ -2264,7 +2518,9 @@ export function CaseDetail({ caseId }: { caseId: string }) {
     try {
       applyCaseUpdate(await craApi.run(item.case_id));
     } catch (runError) {
-      setError(runError instanceof Error ? runError.message : 'Agent 执行失败');
+      setError(
+        runError instanceof Error ? runError.message : '当前步骤执行失败'
+      );
     } finally {
       setActing(false);
     }
@@ -2310,7 +2566,6 @@ export function CaseDetail({ caseId }: { caseId: string }) {
     try {
       const updated = await craApi.uploadFinancialReport(item.case_id, file);
       applyCaseUpdate(updated);
-      setSelectedStage('financial_evidence');
       toast.success('财报已完成抽取', {
         description: `已进入财务证据签署，共 ${((updated.notes.financial_values || []) as unknown[]).length} 个字段。`,
       });
@@ -2498,10 +2753,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
           task={task}
           acting={acting}
           onRun={() => void run()}
-          onConfirm={() =>
-            task &&
-            void resolve(task, { export_file: item.notes.export_file_name })
-          }
+          onConfirm={(resolution) => task && void resolve(task, resolution)}
           canApprove={Boolean(capabilities?.can_approve_final)}
           canRun={Boolean(capabilities?.can_write)}
         />
@@ -2724,7 +2976,10 @@ export function CaseDetail({ caseId }: { caseId: string }) {
           </div>
         </div>
 
-        <div className="mt-2 flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none]">
+        <div
+          className="mt-2 flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none]"
+          aria-label="案件处理进度与阶段回看"
+        >
           {visibleStages.map((stage, index) => {
             const active = viewedStage === stage;
             const current = currentVisibleStage === stage;
@@ -2786,8 +3041,8 @@ export function CaseDetail({ caseId }: { caseId: string }) {
                   </p>
                   <p className="mt-1 text-xs leading-5 text-blue-800">
                     {reliableStageSnapshot
-                      ? '展示该步骤完成时保存的结果；回看不会改变当前流程状态。'
-                      : '该旧步骤没有当时保存的可验证快照，因此不展示当前数据。'}
+                      ? '展示该阶段完成时保存的结果；回看不会改变当前流程状态。'
+                      : '该阶段没有当时保存的可验证快照，因此不展示当前数据。'}
                   </p>
                 </div>
               </div>
@@ -2797,7 +3052,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
                 onClick={() => setSelectedStage(currentVisibleStage)}
                 className="shrink-0 border-blue-200 bg-white text-blue-800 hover:bg-blue-100"
               >
-                返回当前步骤
+                返回当前阶段
               </Button>
             </div>
           )}

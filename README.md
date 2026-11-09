@@ -1,11 +1,11 @@
 # CRA Agent Workbench
 
-一个以 CRA Excel 为交接边界的企业信用评审 Agent。它将建案、企业主体核验、财务证据、RAG 检索、风险意见和 Excel 回填连成可审计工作流。
+一个以 CRA Excel 为交接边界的企业信用评审 Agent 原型。它将建案、企业主体核验、财务证据、RAG 检索、风险意见和 Excel 回填组织为受控工作流；P0 企业闭环仍在建设，当前不得表述为生产授信系统。
 
 ## 产品边界
 
 - Agent 负责重复的读取、检索、校验和起草。
-- 企业主体合并、财务证据、风险意见和最终额度由人签署。
+- 企业主体、财务证据和风险意见保留人工责任；最终复核任务已存在，但确定性评分、偏离信息和内容哈希签署尚待 P0 接入。
 - SAP 往年财务只从上传的 CRA Excel 读取，不伪装成已接入生产 SAP。
 - 制度、案件证据、历史案件与公开资料分库检索，回答必须带出处。
 - Bad Case 按“流出层级 × 后果影响”记录，被防线截停的错误不会被当成事故。
@@ -56,14 +56,20 @@ pnpm test:api
 
 ## 文档
 
-- `PRODUCT.md`：产品真值与边界
+- `PRODUCT.md`：主 PRD、P0 范围、验收门禁与待确认事项（产品真值源）
+- `docs/16-capability-status.md`：当前能力状态与发布证据清单（运行事实附件）
 - `DESIGN.md`：视觉和交互规范
 - `docs/01-product-flow.md`：用户与业务流程
 - `docs/02-architecture-and-data.md`：架构、数据与集成边界
-- `docs/03-agent-and-rag.md`：Agent、RAG、人工卡点与 Bad Case
+- `docs/03-agent-and-rag.md`：Agent/RAG 当前实现与工程排障（不重复产品需求）
+- `docs/10-rag-knowledge-design.md`：知识治理与 RAG 验收实施附件
+- `docs/11-knowledge-data-build-plan.md`：隔离知识数据构建与发布准备记录
 - `docs/04-development-plan.md`：开发阶段与验收门槛
 - `docs/05-test-and-user-review.md`：测试与用户验收方法
 - `docs/06-final-review.md`：最终实测结论
 - `docs/08-database-auth-and-rag.md`：数据库、账号、权限、案件和 RAG 配置
 - `docs/12-agent-rag-mcp-review-and-release-gate.md`：Skill、只读 MCP、RAG/Agent 改造的实测状态和发布门禁。GLEIF MCP 为可选依赖：`services/cra_api/.venv/bin/python -m pip install -r services/cra_api/requirements-mcp.txt`；仅在受控测试环境显式设置 `CRA_ENABLE_GLEIF_MCP=true` 后，对明确给出的 LEI 做只读查询。
 - `docs/15-enterprise-upload-storage-design.md`：文件直传、数据库元数据、版本、审计、R2 权限和无停机迁移方案
+- `docs/17-product-interview-story.md`：产品背景、关键决策、实施、价值、难点与 Demo 面试讲法
+
+旧审查记录和专题设计不得覆盖 `PRODUCT.md` 的当前事实与范围；发生冲突时，以主 PRD 和能力状态矩阵为准，并在实现验收后再更新完成态。

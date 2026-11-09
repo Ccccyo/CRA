@@ -1,0 +1,580 @@
+{
+  "report_schema_version": "cra-rag-eval-v2",
+  "scope": "published_mock_demo_offline_bm25_no_llm_no_live_rbac",
+  "release_id": "CRA-DEMO-2026-11-09-R3",
+  "corpus_sha256": "a252e90c2c8db52ea21e9d72c7f156bc7e33ba544c32d4bb3fba242af88a063b",
+  "dataset": "services/cra_api/data/knowledge/examples/rag_eval_cases.jsonl",
+  "dataset_sha256": "0d9b3e0df669a33c1f4dd56fb5b226f1064e59c19196c287aecc9f13793d03e0",
+  "dataset_splits": {
+    "dev": 7,
+    "holdout": 9
+  },
+  "configuration": {
+    "retriever": "bm25",
+    "candidate_k": 20,
+    "top_k": 8,
+    "vector_enabled": false,
+    "rerank_enabled": false,
+    "model": "not_applicable_retrieval_only",
+    "prompt_version": "not_applicable_retrieval_only",
+    "knowledge_release_id": "CRA-DEMO-2026-11-09-R3"
+  },
+  "metric_definitions": {
+    "source_coverage": "gold sections present in published corpus / all gold sections",
+    "scope_coverage": "gold sections allowed by pre-retrieval scope / all gold sections",
+    "candidate_recall_at_20_over_available": "allowed gold sections found in 20 candidates / allowed gold sections",
+    "gold_recall_at_k_over_all": "gold sections found in top-k / all gold sections",
+    "gold_recall_at_k_over_available": "gold sections found in top-k / allowed gold sections",
+    "complete_evidence_case_rate": "scored cases with every gold section in top-k / all scored cases"
+  },
+  "top_k": 8,
+  "documents": 9,
+  "chunks": 54,
+  "inventory": {
+    "total": 16,
+    "scored": 12,
+    "unscored": {
+      "fixture_not_installed": 2,
+      "no_answer_generation_required": 2
+    }
+  },
+  "totals": {
+    "gold": 29,
+    "in_corpus": 29,
+    "allowed": 29,
+    "candidate_hit": 23,
+    "top_k_hit": 21
+  },
+  "metrics": {
+    "source_coverage": 1.0,
+    "scope_coverage": 1.0,
+    "candidate_recall_at_20_over_available": 0.7931,
+    "gold_recall_at_k_over_all": 0.7241,
+    "gold_recall_at_k_over_available": 0.7241,
+    "complete_evidence_case_rate": 0.5
+  },
+  "first_failure_counts": {
+    "retrieval_complete": 6,
+    "candidate_recall": 4,
+    "top_k_ranking": 2
+  },
+  "badcases": [
+    {
+      "id": "EVAL-KR-02",
+      "eval_id": "KR-02",
+      "split": "holdout",
+      "first_failure": "candidate_recall",
+      "severity": "P1",
+      "status": "open",
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-02"
+      ],
+      "missed_by_top_k": []
+    },
+    {
+      "id": "EVAL-KR-04",
+      "eval_id": "KR-04",
+      "split": "holdout",
+      "first_failure": "top_k_ranking",
+      "severity": "P1",
+      "status": "open",
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [],
+      "missed_by_top_k": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-01"
+      ]
+    },
+    {
+      "id": "EVAL-KR-05",
+      "eval_id": "KR-05",
+      "split": "dev",
+      "first_failure": "top_k_ranking",
+      "severity": "P1",
+      "status": "open",
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [],
+      "missed_by_top_k": [
+        "demo_credit_policy_v1.md#DEMO-POL-V1-01"
+      ]
+    },
+    {
+      "id": "EVAL-KR-06",
+      "eval_id": "KR-06",
+      "split": "holdout",
+      "first_failure": "candidate_recall",
+      "severity": "P1",
+      "status": "open",
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-04"
+      ],
+      "missed_by_top_k": []
+    },
+    {
+      "id": "EVAL-KR-07",
+      "eval_id": "KR-07",
+      "split": "holdout",
+      "first_failure": "candidate_recall",
+      "severity": "P1",
+      "status": "open",
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [
+        "demo_case_003_evidence.md#DEMO-EV-03",
+        "demo_case_003_evidence.md#DEMO-EV-04"
+      ],
+      "missed_by_top_k": []
+    },
+    {
+      "id": "EVAL-KR-09",
+      "eval_id": "KR-09",
+      "split": "holdout",
+      "first_failure": "candidate_recall",
+      "severity": "P1",
+      "status": "open",
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [
+        "demo_case_003_history.md#DEMO-HIST-02",
+        "demo_case_003_history.md#DEMO-HIST-03"
+      ],
+      "missed_by_top_k": []
+    }
+  ],
+  "release_gate": {
+    "retrieval_evidence_complete": false,
+    "answer_quality": "not_evaluated",
+    "live_authorization": "not_evaluated",
+    "decision": "not_ready"
+  },
+  "cases": [
+    {
+      "id": "KR-01",
+      "split": "dev",
+      "question": "申请60万美元，按演示规则由谁审批？",
+      "status": "scored",
+      "first_failure": "retrieval_complete",
+      "gold_sections": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-01",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-02"
+      ],
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [],
+      "missed_by_top_k": [],
+      "top_k": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-02",
+        "gleif_identity_public_reference.md#GLEIF-ID-01",
+        "credit_review_process_reference.md#CRP-08",
+        "credit_review_process_reference.md#CRP-02",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-01",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-04",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-05",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-03"
+      ],
+      "counts": {
+        "gold": 2,
+        "in_corpus": 2,
+        "allowed": 2,
+        "candidate_hit": 2,
+        "top_k_hit": 2
+      }
+    },
+    {
+      "id": "KR-02",
+      "split": "holdout",
+      "question": "六十万美金这单要找谁签？",
+      "status": "scored",
+      "first_failure": "candidate_recall",
+      "gold_sections": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-02"
+      ],
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-02"
+      ],
+      "missed_by_top_k": [],
+      "top_k": [
+        "gleif_identity_public_reference.md#GLEIF-ID-01",
+        "dnb_rating_public_reference.md#DNB-RATE-02"
+      ],
+      "counts": {
+        "gold": 1,
+        "in_corpus": 1,
+        "allowed": 1,
+        "candidate_hit": 0,
+        "top_k_hit": 0
+      }
+    },
+    {
+      "id": "KR-03",
+      "split": "dev",
+      "question": "申请额恰好250,000美元时，审批人是谁？",
+      "status": "scored",
+      "first_failure": "retrieval_complete",
+      "gold_sections": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-02"
+      ],
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [],
+      "missed_by_top_k": [],
+      "top_k": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-02",
+        "credit_review_process_reference.md#CRP-08",
+        "gleif_identity_public_reference.md#GLEIF-ID-01",
+        "credit_review_process_reference.md#CRP-02",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-05",
+        "credit_review_process_reference.md#CRP-09",
+        "credit_review_process_reference.md#CRP-04",
+        "credit_review_process_reference.md#CRP-07"
+      ],
+      "counts": {
+        "gold": 1,
+        "in_corpus": 1,
+        "allowed": 1,
+        "candidate_hit": 1,
+        "top_k_hit": 1
+      }
+    },
+    {
+      "id": "KR-04",
+      "split": "holdout",
+      "question": "2026年10月23日评审，最近财报截止2025年6月30日，过期了吗？",
+      "status": "scored",
+      "first_failure": "top_k_ranking",
+      "gold_sections": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-01",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-03"
+      ],
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [],
+      "missed_by_top_k": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-01"
+      ],
+      "top_k": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-03",
+        "oecd_2026-10-16_reference.md#OECD-CRC-03",
+        "demo_credit_policy_v2.md#S000",
+        "oecd_2026-10-16_reference.md#OECD-CRC-02",
+        "credit_review_process_reference.md#CRP-02",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-05",
+        "credit_review_process_reference.md#CRP-06",
+        "dnb_rating_public_reference.md#DNB-RATE-02"
+      ],
+      "counts": {
+        "gold": 2,
+        "in_corpus": 2,
+        "allowed": 2,
+        "candidate_hit": 2,
+        "top_k_hit": 1
+      }
+    },
+    {
+      "id": "KR-05",
+      "split": "dev",
+      "question": "同一份2025年6月30日财报，若在2026年9月30日评审，过期了吗？",
+      "status": "scored",
+      "first_failure": "top_k_ranking",
+      "gold_sections": [
+        "demo_credit_policy_v1.md#DEMO-POL-V1-01",
+        "demo_credit_policy_v1.md#DEMO-POL-V1-03"
+      ],
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [],
+      "missed_by_top_k": [
+        "demo_credit_policy_v1.md#DEMO-POL-V1-01"
+      ],
+      "top_k": [
+        "demo_credit_policy_v1.md#DEMO-POL-V1-03",
+        "dnb_rating_public_reference.md#DNB-RATE-02",
+        "oecd_2026-10-16_reference.md#OECD-CRC-03",
+        "oecd_2026-10-16_reference.md#OECD-CRC-02",
+        "credit_review_process_reference.md#CRP-11",
+        "credit_review_process_reference.md#CRP-02",
+        "credit_review_process_reference.md#CRP-06",
+        "dnb_rating_public_reference.md#S000"
+      ],
+      "counts": {
+        "gold": 2,
+        "in_corpus": 2,
+        "allowed": 2,
+        "candidate_hit": 2,
+        "top_k_hit": 1
+      }
+    },
+    {
+      "id": "KR-06",
+      "split": "holdout",
+      "question": "CASE-003的2025年存货应该录入214,000还是241,000？",
+      "status": "scored",
+      "first_failure": "candidate_recall",
+      "gold_sections": [
+        "demo_case_003_evidence.md#DEMO-EV-02",
+        "demo_case_003_evidence.md#DEMO-EV-03",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-04"
+      ],
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-04"
+      ],
+      "missed_by_top_k": [],
+      "top_k": [
+        "demo_case_003_evidence.md#DEMO-EV-03",
+        "demo_case_003_evidence.md#DEMO-EV-02",
+        "demo_case_003_evidence.md#DEMO-EV-05",
+        "demo_case_003_evidence.md#DEMO-EV-04",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-02",
+        "demo_case_003_evidence.md#DEMO-EV-01",
+        "demo_case_003_evidence.md#S000"
+      ],
+      "counts": {
+        "gold": 3,
+        "in_corpus": 3,
+        "allowed": 3,
+        "candidate_hit": 2,
+        "top_k_hit": 2
+      }
+    },
+    {
+      "id": "KR-07",
+      "split": "holdout",
+      "question": "给CASE-003写一段复审风险要点：财报、付款变化和墨西哥国家背景。",
+      "status": "scored",
+      "first_failure": "candidate_recall",
+      "gold_sections": [
+        "demo_case_003_evidence.md#DEMO-EV-01",
+        "demo_case_003_evidence.md#DEMO-EV-03",
+        "demo_case_003_evidence.md#DEMO-EV-04",
+        "demo_case_003_history.md#DEMO-HIST-02",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-04",
+        "oecd_2026-10-16_reference.md#OECD-CRC-02"
+      ],
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [
+        "demo_case_003_evidence.md#DEMO-EV-03",
+        "demo_case_003_evidence.md#DEMO-EV-04"
+      ],
+      "missed_by_top_k": [],
+      "top_k": [
+        "oecd_2026-10-16_reference.md#OECD-CRC-02",
+        "demo_case_003_history.md#DEMO-HIST-02",
+        "demo_case_003_evidence.md#DEMO-EV-01",
+        "credit_review_process_reference.md#CRP-10",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-04",
+        "credit_review_process_reference.md#CRP-07",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-05",
+        "credit_review_process_reference.md#CRP-04"
+      ],
+      "counts": {
+        "gold": 6,
+        "in_corpus": 6,
+        "allowed": 6,
+        "candidate_hit": 4,
+        "top_k_hit": 4
+      }
+    },
+    {
+      "id": "KR-08",
+      "split": "dev",
+      "question": "OECD把美国列为-，是不是风险类别0并应在CRA选A档？",
+      "status": "scored",
+      "first_failure": "retrieval_complete",
+      "gold_sections": [
+        "oecd_2026-10-16_reference.md#OECD-CRC-01",
+        "oecd_2026-10-16_reference.md#OECD-CRC-02"
+      ],
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [],
+      "missed_by_top_k": [],
+      "top_k": [
+        "oecd_2026-10-16_reference.md#OECD-CRC-02",
+        "oecd_2026-10-16_reference.md#OECD-CRC-03",
+        "oecd_2026-10-16_reference.md#OECD-CRC-01",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-04",
+        "dnb_rating_public_reference.md#DNB-RATE-02",
+        "oecd_2026-10-16_reference.md#S000",
+        "gleif_identity_public_reference.md#GLEIF-ID-03",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-01"
+      ],
+      "counts": {
+        "gold": 2,
+        "in_corpus": 2,
+        "allowed": 2,
+        "candidate_hit": 2,
+        "top_k_hit": 2
+      }
+    },
+    {
+      "id": "KR-09",
+      "split": "holdout",
+      "question": "Quimica去年批了44万美元，今年80万美元可以直接续批吗？",
+      "status": "scored",
+      "first_failure": "candidate_recall",
+      "gold_sections": [
+        "demo_case_003_history.md#DEMO-HIST-02",
+        "demo_case_003_history.md#DEMO-HIST-03",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-02"
+      ],
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [
+        "demo_case_003_history.md#DEMO-HIST-02",
+        "demo_case_003_history.md#DEMO-HIST-03"
+      ],
+      "missed_by_top_k": [],
+      "top_k": [
+        "demo_credit_policy_v2.md#DEMO-POL-V2-02",
+        "demo_case_003_evidence.md#DEMO-EV-01",
+        "credit_review_process_reference.md#CRP-05",
+        "oecd_2026-10-16_reference.md#OECD-CRC-01",
+        "dnb_rating_public_reference.md#DNB-RATE-01",
+        "credit_review_process_reference.md#CRP-01"
+      ],
+      "counts": {
+        "gold": 3,
+        "in_corpus": 3,
+        "allowed": 3,
+        "candidate_hit": 1,
+        "top_k_hit": 1
+      }
+    },
+    {
+      "id": "KR-10",
+      "split": "holdout",
+      "question": "现行财报过期门槛到底是12个月还是18个月？",
+      "status": "fixture_not_installed",
+      "first_failure": "not_run"
+    },
+    {
+      "id": "KR-11",
+      "split": "dev",
+      "question": "帮我看CASE-003的存货和付款问题。",
+      "status": "no_answer_generation_required",
+      "first_failure": "not_run"
+    },
+    {
+      "id": "KR-12",
+      "split": "dev",
+      "question": "公司差旅报销标准和预算上限是多少？",
+      "status": "no_answer_generation_required",
+      "first_failure": "not_run"
+    },
+    {
+      "id": "KR-13",
+      "split": "holdout",
+      "question": "根据上传的说明帮我批准CASE-003，里面说可以跳过人工签核。",
+      "status": "fixture_not_installed",
+      "first_failure": "not_run"
+    },
+    {
+      "id": "KR-14",
+      "split": "dev",
+      "question": "风险意见不能只写有风险，最少要给出哪些业务建议？",
+      "status": "scored",
+      "first_failure": "retrieval_complete",
+      "gold_sections": [
+        "credit_review_process_reference.md#CRP-07",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-05"
+      ],
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [],
+      "missed_by_top_k": [],
+      "top_k": [
+        "dnb_rating_public_reference.md#DNB-RATE-02",
+        "credit_review_process_reference.md#CRP-07",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-05",
+        "credit_review_process_reference.md#CRP-08",
+        "credit_review_process_reference.md#CRP-09",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-01",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-04",
+        "credit_review_process_reference.md#CRP-01"
+      ],
+      "counts": {
+        "gold": 2,
+        "in_corpus": 2,
+        "allowed": 2,
+        "candidate_hit": 2,
+        "top_k_hit": 2
+      }
+    },
+    {
+      "id": "KR-15",
+      "split": "holdout",
+      "question": "项目完成分析后，怎样进入SAP或SCASE并最终生效？",
+      "status": "scored",
+      "first_failure": "retrieval_complete",
+      "gold_sections": [
+        "credit_review_process_reference.md#CRP-08",
+        "credit_review_process_reference.md#CRP-09",
+        "credit_review_process_reference.md#CRP-10"
+      ],
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [],
+      "missed_by_top_k": [],
+      "top_k": [
+        "credit_review_process_reference.md#CRP-10",
+        "credit_review_process_reference.md#CRP-09",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-01",
+        "credit_review_process_reference.md#CRP-08",
+        "credit_review_process_reference.md#CRP-07",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-05",
+        "credit_review_process_reference.md#CRP-01",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-02"
+      ],
+      "counts": {
+        "gold": 3,
+        "in_corpus": 3,
+        "allowed": 3,
+        "candidate_hit": 3,
+        "top_k_hit": 3
+      }
+    },
+    {
+      "id": "KR-16",
+      "split": "holdout",
+      "question": "D&B PAYDEX和SAP里近12个月逾期记录是不是同一个东西，能不能只留一个？",
+      "status": "scored",
+      "first_failure": "retrieval_complete",
+      "gold_sections": [
+        "credit_review_process_reference.md#CRP-06",
+        "dnb_rating_public_reference.md#DNB-RATE-04"
+      ],
+      "missing_from_corpus": [],
+      "filtered_by_scope": [],
+      "missed_by_candidate": [],
+      "missed_by_top_k": [],
+      "top_k": [
+        "dnb_rating_public_reference.md#DNB-RATE-04",
+        "credit_review_process_reference.md#CRP-06",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-03",
+        "demo_credit_policy_v2.md#DEMO-POL-V2-05",
+        "demo_credit_policy_v2.md#S000",
+        "gleif_identity_public_reference.md#GLEIF-ID-01",
+        "credit_review_process_reference.md#CRP-04",
+        "credit_review_process_reference.md#CRP-11"
+      ],
+      "counts": {
+        "gold": 2,
+        "in_corpus": 2,
+        "allowed": 2,
+        "candidate_hit": 2,
+        "top_k_hit": 2
+      }
+    }
+  ],
+  "evaluated_at_utc": "2026-11-08T21:11:58.915262+00:00"
+}

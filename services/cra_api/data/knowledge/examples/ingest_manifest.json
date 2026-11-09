@@ -34,15 +34,41 @@
       "owner": "演示项目维护者"
     },
     {
+      "source_path": "knowledge/examples/credit_review_process_reference.md",
+      "library_id": "public_reference",
+      "priority": "P0",
+      "source_kind": "project_summary_of_business_process",
+      "status": "staging",
+      "authority": "industry_process_reference_not_policy",
+      "document_version": "2026-11-09",
+      "source_urls": [
+        "https://help.sap.com/docs/SAP_ERP/3eb91abaa20c4dc696ab706d9d50cb74/26191c54f807f47de10000000a174cb4.html?version=6.18.latest",
+        "https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/3cb1182b4a184bdd93f8d62e3f1f0741/3d8f366b6c9e4baaa74850b527bb8b27.html",
+        "https://help.sap.com/docs/SAP_S4HANA_CLOUD/918bca53037f408f91a2295d04ac16bc/2381c6da97e54310b28810da8afe9b7f.html"
+      ],
+      "verified_at": "2026-11-09",
+      "refresh_interval_days": 90,
+      "region": "generic_trade_credit",
+      "access_scope": "public_reference",
+      "owner": "待指定信用运营负责人"
+    },
+    {
       "source_path": "policy/cra_scoring_rules_mock.md",
       "library_id": "policy",
       "priority": "P0",
       "source_kind": "mock_scoring_description",
-      "status": "needs_review",
+      "status": "staging",
       "authority": "demo_only",
-      "document_version": "unversioned_mock",
-      "effective_from": null,
+      "document_version": "mock-score-v1",
+      "effective_from": "2026-11-09",
       "effective_to": null,
+      "verified_at": "2026-11-09",
+      "refresh_interval_days": 90,
+      "source_urls": [
+        "https://help.sap.com/docs/SAP_S4HANA_CLOUD/918bca53037f408f91a2295d04ac16bc/0ede17fb271e41fdad511c6444c02e58.html",
+        "https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/3cb1182b4a184bdd93f8d62e3f1f0741/6c529513913f427d8d73bd359cb74ca5.html",
+        "https://nacm.org/pdfs/articles/Establishing_a_Credit_Policy.pdf"
+      ],
       "region": "ALL_DEMO",
       "credit_segment": "0001",
       "access_scope": "demo_analyst",
@@ -99,6 +125,7 @@
       "source_url": "https://www.oecd.org/content/dam/oecd/en/topics/policy-sub-issues/country-risk-classification/cre-crc-current-english.pdf",
       "source_as_of": "2026-10-16",
       "verified_at": "2026-10-23",
+      "refresh_interval_days": 90,
       "region": "global",
       "access_scope": "public_reference",
       "owner": "待指定公开资料维护人"
@@ -113,6 +140,7 @@
       "document_version": "2026-10-23-summary",
       "source_url": "https://www.gleif.org/en/lei-data/access-and-use-lei-data",
       "verified_at": "2026-10-23",
+      "refresh_interval_days": 30,
       "region": "global_LEI_coverage",
       "access_scope": "public_reference",
       "owner": "待指定公开资料维护人"
@@ -125,8 +153,12 @@
       "status": "staging",
       "authority": "secondary_reference",
       "document_version": "2026-10-23-summary",
-      "source_url": "https://docs.dnb.com/reference/ratings/en-US/guide",
-      "verified_at": "2026-10-23",
+      "source_urls": [
+        "https://docs.dnb.com/reference/ratings/en-US/guide",
+        "https://www.dnb.com/en-us/smb/resources/credit-scores/what-is-paydex-score.html"
+      ],
+      "verified_at": "2026-11-09",
+      "refresh_interval_days": 30,
       "region": "market_specific",
       "access_scope": "public_reference",
       "owner": "待指定公开资料维护人"

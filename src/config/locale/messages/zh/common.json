@@ -1,8 +1,8 @@
 {
   "metadata": {
-    "title": "CRA Agent · 企业信用评审工作台",
-    "description": "从 CRA Excel 建案、主体核验、财务证据到风险意见和回填的可追溯 Agent 工作台。",
-    "keywords": "CRA, 企业信用, 财务评审, Agent, RAG"
+    "title": "CRA Workbench · 企业信用评审工作台",
+    "description": "从 CRA Excel 建案、主体核验、财务证据到风险意见和回填的企业信用评审工作台。",
+    "keywords": "CRA, 企业信用, 财务评审, 风险意见, 证据管理"
   },
   "sign": {
     "sign_in_title": "登录",

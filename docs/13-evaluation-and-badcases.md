@@ -14,7 +14,7 @@
 | 执行与权限 | 越权案件在检索前阻断；不自动审批、签署或用历史决定替代现行规则 | API 授权测试、状态和审计记录 | 部分单测已有；在线端到端待测 |
 | 业务结果 | 人工能核查来源、处理异常并正确完成签核/Excel 回填 | 人工评审、回填重开核对、耗时与返工 | 待业务评审；模拟结果不能外推真实业务 |
 
-金标由业务负责人确认，开发者维护测试执行。开发集可用于调试，holdout 仅用于阶段验收；修改规则时先复核金标。`rag_eval_cases.jsonl` 的 13 条只是起步样本，不能推断总体准确率或线上风险为零。
+金标由业务负责人确认，开发者维护测试执行。开发集可用于调试，holdout 仅用于阶段验收；修改规则时先复核金标。`rag_eval_cases.jsonl` 的 16 条只是起步样本，不能推断总体准确率或线上风险为零。
 
 ## 2. 可运行基线和统计口径
 
@@ -22,6 +22,7 @@
 
 ```bash
 services/cra_api/.venv/bin/python scripts/evaluate-cra-rag.py --output services/cra_api/eval/reports/demo-rag-baseline-2026-10-26.json
+services/cra_api/.venv/bin/python scripts/evaluate-cra-rag.py --output services/cra_api/eval/reports/demo-rag-core-2026-11-09-r2.json
 services/cra_api/.venv/bin/python -m pytest services/cra_api/tests/test_rag_evaluation.py -q
 ```
 
@@ -39,6 +40,19 @@ services/cra_api/.venv/bin/python -m pytest services/cra_api/tests/test_rag_eval
 | 全部必要证据均到齐的题 | 4/9（44.44%） |
 
 当前检索证据门槛**未通过**。这不是生成答案准确率、拒答率或线上权限测试。向量与重排依赖未安装，本次没有比较它们，不能声称混合检索的效果。
+
+2026-11-09 精简 R2（已运行；8 份核心业务资料、30 张拟议卡默认不发布）：
+
+| 项 | 实测 |
+|---|---:|
+| 演示文档 / 片段 | 8 / 46 |
+| 题库 / 可评分 / 未评分 | 16 / 12 / 4 |
+| 金标在发布和授权范围内 | 29/29（100%） |
+| 可用金标在候选前 20 | 23/29（79.31%） |
+| 金标进入最终前 8 | 21/29（72.41%） |
+| 全部必要证据均到齐的题 | 6/12（50%） |
+
+新增的三条真实业务内容题——风险意见的具体建议、SAP/SCASE 交接、D&B PAYDEX 与 SAP AR 的区别——均完整命中。剩余首错为 KR-02/06/07/09 的候选召回，以及 KR-04/05 的 Top-K 排序。发布门禁仍未通过；这次改动证明的是内容覆盖和业务边界改善，不是生成准确率或生产可用性。
 
 ## 3. 首轮 Bad Case 归因
 

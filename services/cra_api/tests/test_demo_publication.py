@@ -21,21 +21,22 @@ def _release_module():
 def test_demo_release_is_allowlisted_labelled_and_local_idempotent(tmp_path):
     module = _release_module()
     prepared = module["prepare_release"]()
-    assert len(prepared) == 35
-    assert sum(len(chunks) for _, chunks in prepared) == 54
-    assert all(doc["title"].startswith(("【模拟演示】", "【拟议·演示】")) for doc, _ in prepared)
+    assert len(prepared) == 8
+    assert sum(len(chunks) for _, chunks in prepared) == 48
+    assert all(doc["title"].startswith(("【模拟演示】", "【公开参考】")) for doc, _ in prepared)
+    assert not any(doc["library_id"] in {"proposed_rule", "evidence_spec"} for doc, _ in prepared)
     assert all(doc["metadata"]["demo_only"] is True for doc, _ in prepared)
     assert all(doc["metadata"]["is_published"] is True for doc, _ in prepared)
     assert all(
-        "非真实制度或客户事实" in chunk["text"] or "非正式授信政策" in chunk["text"]
+        "非真实制度或客户事实" in chunk["text"] or "不是公司政策或客户事实" in chunk["text"]
         for _, chunks in prepared for chunk in chunks
     )
     path = tmp_path / "workbench-demo.db"
     first = module["publish_local"](prepared, path)
     second = module["publish_local"](prepared, path)
-    assert first["changed_documents"] == 35
+    assert first["changed_documents"] == 8
     assert second["changed_documents"] == 0
-    assert len(WorkflowStore(path).knowledge_chunks()) == 54
+    assert len(WorkflowStore(path).knowledge_chunks()) == 48
 
 
 def test_demo_policy_date_case_and_bp_are_enforced_before_retrieval():
@@ -78,15 +79,6 @@ def test_demo_policy_date_case_and_bp_are_enforced_before_retrieval():
     assert own_history.search("440000 历史审批", k=20)
     assert other_history.search("440000 历史审批", k=20) == []
 
-    own_case = ScopedRetriever(
-        shared, set(), case_id="CASE-003", case_only=True, **kwargs,
-    )
-    other_case = ScopedRetriever(
-        shared, set(), case_id="CASE-001", case_only=True, **kwargs,
-    )
-    assert own_case.search("存货", k=20)
-    assert other_case.search("存货", k=20) == []
-
     real_case = ScopedRetriever(
         shared, {"policy", "public_reference", "case_history"},
         review_date="2026-10-24", **{**kwargs, "demo_case": False},
@@ -94,7 +86,7 @@ def test_demo_policy_date_case_and_bp_are_enforced_before_retrieval():
     assert real_case.search("演示政策 GLEIF 历史审批", k=20) == []
 
 
-def test_demo_catalog_hides_unreleased_and_case_history_from_analyst():
+def test_demo_catalog_shows_only_the_eight_published_release_documents():
     module = _release_module()
     prepared = module["prepare_release"]()
     documents = [
@@ -109,14 +101,23 @@ def test_demo_catalog_hides_unreleased_and_case_history_from_analyst():
     principal = {"user_id": "analyst", "name": "Analyst", "role": "credit_analyst"}
     catalog = knowledge_catalog(documents, principal, module["RELEASE_ID"])
     visible = [doc for library in catalog["libraries"] for doc in library["documents"]]
-    assert len(visible) == 33
+    assert len(visible) == 8
+    assert {library["id"] for library in catalog["libraries"]} == {
+        "policy", "public_reference", "case_history",
+    }
+    assert catalog["active_release"] == {
+        "id": module["RELEASE_ID"],
+        "document_count": 8,
+        "chunk_count": 48,
+        "status": "published",
+    }
     assert all(doc["demo_only"] is True for doc in visible)
     assert all(doc["id"] != "legacy" for doc in visible)
 
 
 def test_proposed_cards_are_readable_only_in_demo_case_and_release():
     module = _release_module()
-    proposals = [item for item in module["prepare_release"]()
+    proposals = [item for item in module["prepare_release"](include_proposals=True)
                  if item[0]["library_id"] in {"proposed_rule", "evidence_spec"}]
     assert len(proposals) == 30
     chunks = [

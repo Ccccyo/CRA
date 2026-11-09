@@ -1,5 +1,5 @@
 {
-  "header": {"brand": {"title": "CRA Agent", "logo": {"src": "/logo.png", "alt": "CRA Agent"}, "url": "/admin"}, "show_trigger": false},
+  "header": {"brand": {"title": "CRA Workbench", "logo": {"src": "/logo.png", "alt": "CRA Workbench"}, "url": "/admin"}, "show_trigger": false},
   "main_navs": [{"title": "系统管理", "items": [
     {"title": "用户", "url": "/admin/users", "icon": "User"},
     {"title": "角色", "url": "/admin/roles", "icon": "Users"},

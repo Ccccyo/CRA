@@ -78,7 +78,7 @@ def _fallback_qualitative(case: Case) -> Dict[str, Dict[str, str]]:
     inputs = case.inputs
     pay = inputs.get("pay_habits_from_ar", "")
     if pay not in QUALITATIVE_OPTIONS["pay_habits"]:
-        pay = "No history"
+        pay = ""
     hint = inputs.get("company_type_hint", "").lower()
     company_type = (
         "Public listed"
@@ -91,12 +91,12 @@ def _fallback_qualitative(case: Case) -> Dict[str, Dict[str, str]]:
     )
     distinction = inputs.get("customer_distinction_from_sales", "")
     if distinction not in QUALITATIVE_OPTIONS["customer_distinction"]:
-        distinction = "Standard"
+        distinction = ""
     return {
-        "pay_habits": {"choice": pay, "reason": f"SAP 应收记录：{inputs.get('pay_habits_detail') or '未提供'} [S3]"},
+        "pay_habits": {"choice": pay, "reason": f"SAP 应收记录：{inputs.get('pay_habits_detail') or '未提供；不能自动视为无付款历史'} [S3]"},
         "company_type": {"choice": company_type, "reason": f"公司类型线索：{inputs.get('company_type_hint') or '未提供'}；仍需核验原件 [S3]"},
         "sovereign_rating": {"choice": "", "reason": "缺少经批准的国家风险到 CRA 档位映射，待分析师核定 [S3]"},
-        "customer_distinction": {"choice": distinction, "reason": f"商务部门标注为 {distinction} [S3]"},
+        "customer_distinction": {"choice": distinction, "reason": (f"商务部门标注为 {distinction} [S3]" if distinction else "缺少商务部门确认的客户分类，待人工补充 [S3]")},
     }
 
 
@@ -166,13 +166,15 @@ def deterministic_risk_opinion(
     )
     warning_line = f"\n3. {demo_warning}" if demo_warning else ""
     comments = (
-        f"【初步意见】待评估：申请额度 {case.requested_cl_usd:,.0f} 美元，"
-        "需核对当期财务证据、主体、付款记录和适用制度；本草稿不构成授信建议或批准。[S3]\n"
+        f"【审查建议】当前不建议直接确认申请额度 {case.requested_cl_usd:,.0f} 美元；"
+        "完成当期财务、主体、付款记录及适用制度核对后，再决定是否进入定量评分。"
+        "本步骤不形成数字额度，数字额度由下一步规则评分生成。[S3]\n"
         f"【主要风险】1. {financial_risk}\n"
         f"2. 国家风险线索为“{sovereign}”，需按当期分类和公司制度复核。[S3]{warning_line}\n"
         f"【待核线索】演示付款记录：{pay_detail}。[S3] "
         f"经营现金流待财务证据签署后核验。[S1]\n"
-        "【建议条件】确认原始报表、评分规则版本和最终额度；如申请额度高于 CRA 建议额度，记录偏离理由并按制度升级审批。"
+        "【建议条件】补齐并签署原始报表、主体和付款记录；确认适用的评分规则版本。"
+        "若规则建议额度低于申请额度，以规则建议额度为复核基准；任何偏离都需说明原因并升级审批。"
     )
     return {
         "draft": {

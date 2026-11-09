@@ -16,8 +16,8 @@ STAGES = [
     "financial_signoff",
     "retrieve_context",
     "risk_signoff",
-    "write_workbook",
     "external_score",
+    "write_workbook",
     "final_signoff",
     "completed",
 ]
@@ -401,6 +401,43 @@ class WorkflowStore:
             conn.commit()
         self.sync_case_knowledge(case_id)
         return self.workflow(case_id)
+
+    def reset_case_review(self, case_id: str) -> Dict[str, Any]:
+        """Restart an in-progress review after its source workbook is replaced.
+
+        Stage snapshots and resolved tasks remain as audit history. Any open work
+        or blocker belongs to the superseded workbook and must not survive the
+        reset.
+        """
+        workflow = self.update_workflow(
+            case_id,
+            status="running",
+            current_stage="resolve_entity",
+            current_task="搜索并排序企业主体候选",
+            blocker="",
+            completed_tasks=1,
+            total_tasks=6,
+        )
+        timestamp = now_iso()
+        with closing(self.connect()) as conn:
+            conn.execute(
+                """
+                UPDATE human_tasks
+                SET status = 'cancelled', resolved_at = ?
+                WHERE case_id = ? AND status = 'open'
+                """,
+                (timestamp, case_id),
+            )
+            conn.execute(
+                """
+                UPDATE bad_cases SET status = 'resolved'
+                WHERE case_id = ? AND status = 'open'
+                """,
+                (case_id,),
+            )
+            conn.commit()
+        self.sync_case_knowledge(case_id)
+        return workflow
 
     def add_event(
         self,

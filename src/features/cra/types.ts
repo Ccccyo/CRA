@@ -125,6 +125,14 @@ export type RagDocument = {
   updated_at: string;
   parser: string;
   has_original: boolean;
+  demo_only?: boolean;
+  document_version?: string;
+  effective_from?: string;
+  effective_to?: string;
+  authority?: string;
+  verified_at?: string;
+  source_as_of?: string;
+  refresh_interval_days?: number | null;
   read_only?: boolean;
 };
 
@@ -149,6 +157,12 @@ export type KnowledgeCatalog = {
   permission_model: 'role_based';
   can_manage: boolean;
   granted_library_count: number;
+  active_release: {
+    id: string;
+    document_count: number;
+    chunk_count: number;
+    status: 'published' | 'unversioned';
+  };
   libraries: RagLibrary[];
 };
 

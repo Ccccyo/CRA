@@ -17,11 +17,19 @@ from cra.external.gleif_mcp import requested_lei
 
 POLICY_TERMS = re.compile(r"政策|制度|审批|权限|复审|升级|授信规则|policy", re.I)
 FORMAL_AUTHORITY_TERMS = re.compile(r"审批权限|谁能批|谁能批准|批准额度|正式授信政策|授信制度")
-PROPOSAL_TERMS = re.compile(r"拟议|风控方法|评估流程|风险评估|证据规范|需要哪些资料|怎么核验|如何核验|如何分析")
+PROCESS_TERMS = re.compile(
+    r"评估流程|风险评估|需要哪些资料|怎么核验|如何核验|如何分析|"
+    r"授信流程|SCASE|Credit Limit Request|怎么进入SAP|如何进入SAP",
+    re.I,
+)
+PROPOSAL_TERMS = re.compile(r"拟议|未获签核.{0,6}(?:风控|方法|规则)|证据规范")
 LIVE_AR_TERMS = re.compile(r"当前敞口|实时敞口|未清应收|最新逾期余额|实时逾期|现在欠款")
 FORBIDDEN_ACTION_TERMS = re.compile(
     r"帮我批准|直接批准|替我审批|跳过.{0,6}签核|给我管理员权限|授予.{0,6}权限"
 )
+CASE_STATUS_TERMS = re.compile(r"为什么停在这里|为什么暂停|卡在哪里|当前进度|当前状态")
+NEXT_ACTION_TERMS = re.compile(r"我需要确认什么|下一步(?:做什么|怎么做)?|需要我做什么")
+EVIDENCE_LIST_TERMS = re.compile(r"使用了哪些评审资料|用了哪些资料|有哪些评审资料|材料清单")
 REVIEW_DATE = re.compile(
     r"(?P<year>20\d{2})[-年/](?P<month>\d{1,2})[-月/](?P<day>\d{1,2})日?"
 )
@@ -113,11 +121,35 @@ def plan_case_question(question: str, frame: CaseTaskFrame) -> ReadPlan:
             libraries=frozenset({"public_reference"}),
             external_lei=lei,
         )
+    if CASE_STATUS_TERMS.search(question):
+        return ReadPlan(
+            intent="case_status_explanation",
+            steps=("workflow_state",),
+            libraries=frozenset(),
+        )
+    if NEXT_ACTION_TERMS.search(question):
+        return ReadPlan(
+            intent="case_next_action",
+            steps=("workflow_state", "open_human_task"),
+            libraries=frozenset(),
+        )
+    if EVIDENCE_LIST_TERMS.search(question):
+        return ReadPlan(
+            intent="case_evidence_inventory",
+            steps=("case_evidence_inventory",),
+            libraries=frozenset(),
+        )
     if FORMAL_AUTHORITY_TERMS.search(question):
         return ReadPlan(
             intent="policy_explanation",
             steps=("policy_retrieval", "case_evidence", "answer_validation"),
             libraries=frozenset({"policy"}),
+        )
+    if PROCESS_TERMS.search(question):
+        return ReadPlan(
+            intent="credit_review_process",
+            steps=("process_reference_retrieval", "policy_retrieval", "case_evidence", "answer_validation"),
+            libraries=frozenset({"policy", "public_reference"}),
         )
     if PROPOSAL_TERMS.search(question):
         return ReadPlan(
@@ -134,5 +166,5 @@ def plan_case_question(question: str, frame: CaseTaskFrame) -> ReadPlan:
     return ReadPlan(
         intent="case_analysis",
         steps=("case_evidence", "authorized_reference_retrieval", "answer_validation"),
-        libraries=frozenset({"policy", "public_reference", "case_history", "proposed_rule", "evidence_spec"}),
+        libraries=frozenset({"policy", "public_reference", "case_history"}),
     )

@@ -1,33 +1,71 @@
-# CRA 打分规则（MOCK · 权重参考演示模板）
+# CRA 确定性评分规则（MOCK · `mock-score-v1`）
 
-## 总分构成
-Overall Score = 70% × Financial Score + 30% × Qualitative Score。
-分数越高代表风险越高。Overall Score 映射到 Risk Class 00–05。
+> 本文件解释 Demo 当前代码的实际计算，不代表 SAP 标准模型，也不代表任何公司的正式授信政策。真实企业应由信用政策负责人批准评分参数、风险等级、额度公式和审批矩阵，并在 SAP Credit Management 中配置、测试和版本化。大模型不执行以下计算，只能整理输入证据和解释计算结果。
 
-## 财务分（Financial Score）
-财务分由四组比率加权得出：
-- 流动性（LIQ）：利息保障倍数、经营现金流相关比率，权重 41%。
-- 杠杆（LVG）：经营现金流对负债、总负债对权益，权重 19%。
-- 盈利（PROF）：营业利润率、资产回报率，权重 37%。
-- 财报质量（Quality of Financials）：是否审计、是否合并报表，权重 3%。
+## SCORE-MOCK-01 · 输入、责任与阻断边界
 
-## 定性分（Qualitative Score）
-定性分由五项组成：
-- Twelve Months Pay Habits（近 12 个月付款习惯）：权重 10%，数据来自 SAP 应收账款记录。档位：Prompt、1 to 15 days arrear、15 to 20 arrear、Over 20 days arrear、No history。
-- Company Type（公司类型）：权重 10%，由分析师判断。档位：Public listed、Private - audited、Private - unaudited、Bankruptcy/Chapter 11。
-- Sovereign Rating（国家风险）：权重 20%。档位：grade A or above、grade B、grade C or Not rated。
-- Customer Distinction（客户战略重要性）：权重 20%，由商务部门提供。档位：Priority - Above Average Margin、Strategic、Standard、Not classified。选择 Priority - Above Average Margin 时，该项分数固定为 2.0。
-- Corporate Credit Risk Rating（外部信用评级）：权重 40%，来自 D&B，按 D&B 评级查表换算，不由分析师主观判断。
+评分输入必须来自同一评审快照：人工签署的本期财务字段、人工确认的四项定性判断、已绑定主体的模拟 D&B Rating、申请额度、额度方法和评审日汇率。缺少签署、汇率或规则版本时，工作流阻断；真实案件没有正式规则时也阻断。所有输出保存 `rule_version`、`input_hash`、计算时间和逐项计算轨迹。
 
-## 额度计算方法
-- A. % Tangible Net Worth：有形净资产（权益减无形资产和商誉）乘以对应比例。
-- C. % Net Worth：净资产乘以对应比例。
-- 默认使用方法 A；有形净资产为负数时不得使用方法 A。
+## SCORE-MOCK-02 · 财务评分计算
 
-## Risk Class 定义
-- 00：Minimal
-- 01：Low
-- 02：Low to Moderate
-- 03：Moderate
-- 04：High
-- 05：Very High
+每个指标先映射为 1–6 分，1 表示本 Demo 中的较低风险，6 表示较高风险。阈值均为项目假设，不能直接用于真实客户。
+
+| 维度 | 指标与公式 | 1 / 2 / 3 / 4 / 5 / 6 分阈值 | 维度权重 |
+|---|---|---|---|
+| 流动性/偿债 | 利息保障倍数 = 营业利润 ÷ 利息费用 | `≥8 / ≥5 / ≥3 / ≥2 / ≥1 / <1` | 41%，与下一指标等权 |
+| 流动性/偿债 | 经营现金流负债比 = 经营现金流 ÷ 总负债 × 100% | `≥20 / ≥15 / ≥10 / ≥5 / >0 / ≤0` | 41%，与上一指标等权 |
+| 杠杆 | 总负债权益比 = 总负债 ÷ 所有者权益 | `≤0.8 / ≤1.2 / ≤1.6 / ≤2.2 / ≤3.0 / >3.0` | 19% |
+| 盈利 | 营业利润率 = 营业利润 ÷ 营业收入 × 100% | `≥12 / ≥8 / ≥5 / ≥3 / >0 / ≤0` | 37%，与下一指标等权 |
+| 盈利 | 资产回报率 = 净利润 ÷ 总资产 × 100% | `≥8 / ≥5 / ≥3 / ≥1 / >0 / ≤0` | 37%，与上一指标等权 |
+| 财报质量 | 已审计状态 | 已审计记 1；`Private - unaudited` 记 4 | 3% |
+
+`Financial Score = 41% × 两项偿债指标均分 + 19% × 杠杆分 + 37% × 两项盈利指标均分 + 3% × 财报质量分`。
+
+当前代码对缺失比率暂记 4 分以保证 Mock 可演示；真实产品不能用默认中间分掩盖缺失，必须按正式政策决定阻断、最差计分或人工例外。权益小于或等于零、分母异常、错币种、错单位等也必须进入单独异常规则，不应只依赖比率分档。
+
+## SCORE-MOCK-03 · 定性评分计算
+
+四个下拉项由系统整理证据并给出建议，分析师确认后才进入计算；D&B Rating 来自已确认主体的模拟记录，不由模型编造。
+
+| 项目 | 必须依据 | Demo 选项 → 分数 | 定性分内部权重 |
+|---|---|---|---|
+| 近 12 个月付款表现 | SAP AR 的到期日、清账日、逾期天数、账龄、争议和催款记录 | Prompt→1；1–15天→2；15–20天→4；超过20天→5；确实无交易历史→3 | 10% |
+| 企业类型/财报质量 | 上市状态、法律状态、财报审计意见和合并范围 | 上市→1；私企已审计→2；私企未审计→3；破产/Chapter 11→6 | 10% |
+| 国家风险档位 | 公司已批准的国家风险映射及评审日有效版本 | A及以上→1；B→3；C或未评级→6 | 20% |
+| 客户重要性 | 商务部门确认的客户分类和审批记录 | Priority→2；Strategic→3；Standard→4；未分类→6 | 20% |
+| D&B 外部信用评级 | 获授权产品、市场、查询日和已确认 DUNS | Mock 评级末位 1→1、2→2、3→4、4→5；无评级→4 | 40% |
+
+`Qualitative Score = Σ（每项分数 × 该项权重）`。
+
+真实企业中“客户重要性”是商业价值和例外审批因素，不等同于违约概率。本 Demo 为兼容原 CRA Excel 保留其 20% 权重；生产化时应由风险负责人决定是否从风险分中移出，改为单独的商业例外和审批升级维度。OECD 分类不能直接生成上述国家档位，D&B PAYDEX 也不能替代 SAP AR 付款表现。
+
+## SCORE-MOCK-04 · 综合评分与风险等级
+
+`Overall Score = 70% × Financial Score + 30% × Qualitative Score`，保留两位小数。
+
+| 综合分 | Demo 风险等级 |
+|---|---|
+| `<1.5` | 00 Minimal |
+| `≥1.5 且 <2.5` | 01 Low |
+| `≥2.5 且 <3.5` | 02 Low to Moderate |
+| `≥3.5 且 <4.5` | 03 Moderate |
+| `≥4.5 且 <5.5` | 04 High |
+| `≥5.5` | 05 Very High |
+
+## SCORE-MOCK-05 · 建议额度
+
+方法 A：`有形净资产 = 所有者权益 − 无形资产 − 商誉`。方法 C：`净资产 = 所有者权益`。Demo 默认方法 A；有形净资产小于或等于零时改用方法 C。随后按风险等级乘以假设比例，并按评审日汇率换算为 USD：00→10%、01→7.5%、02→5%、03→2.5%、04→1%、05→0%。
+
+该结果是模型容量参考，不是批准额。真实企业还应考虑当前额度、敞口、预计销售、账期、担保/保险、集团额度、行业集中度和单一客户上限；这些字段当前未全部接入，因此 Demo 不宣称建议额度可用于真实授信。
+
+## SCORE-MOCK-06 · 审批层级
+
+Demo 申请额 `≤250,000 USD` 为区域信用主管，`>250,000 且 ≤1,000,000 USD` 为区域信用经理，`>1,000,000 USD` 为全球信用总监。申请额高于系统建议额时提高一级，最高为全球信用总监。该矩阵也是模拟政策，不代表 SAP 默认权限或真实企业授权。
+
+## SCORE-MOCK-07 · AI 建议如何生成
+
+模型只接收已授权的案件事实和当前有效知识：SAP AR 付款摘要、财报及审计信息、商务客户分类、获授权外部评级、主体绑定结果和适用政策。模型为每个定性项输出“建议选项 + 可读理由”，系统校验选项是否合法、理由是否有来源；材料不足、来源冲突或没有内部映射时保持空值并要求人工处理。分析师可以修改并签署，签署后确定性评分程序才运行。
+
+真实企业依据不是一套公开通用阈值。SAP 官方说明企业可将业务伙伴主数据、平均逾期天数、过去 12 个月催款和争议等内部数据，以及外部信用信息作为 Credit Rules Engine 参数，自行配置评分与额度公式；D&B PAYDEX 是按金额加权的外部付款经历指标；NACM 强调信用政策需规定资料、额度建立、慢付款、争议、担保和沟通流程。正式落地必须用企业历史坏账/逾期样本、现行政策及业务专家签核校准参数。
+
+来源：[SAP Credit Information and Business Partner Rating](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/3cb1182b4a184bdd93f8d62e3f1f0741/b14b8b13051a4d1296e6c65f25109429.html)、[SAP Maintaining Formulas for Calculating the Scoring](https://help.sap.com/docs/SAP_S4HANA_ON-PREMISE/3cb1182b4a184bdd93f8d62e3f1f0741/6c529513913f427d8d73bd359cb74ca5.html)、[D&B PAYDEX](https://www.dnb.com/en-us/smb/resources/credit-scores/what-is-paydex-score.html)、[NACM Establishing a Credit Policy](https://nacm.org/pdfs/articles/Establishing_a_Credit_Policy.pdf)。

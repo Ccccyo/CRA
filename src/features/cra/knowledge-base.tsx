@@ -6,9 +6,9 @@ import {
   IconArrowLeft,
   IconBooks,
   IconBuildingBank,
-  IconCheck,
   IconChevronLeft,
   IconChevronRight,
+  IconDeviceFloppy,
   IconEdit,
   IconExternalLink,
   IconFileText,
@@ -246,8 +246,8 @@ function DocumentReader({
             </h2>
             <p className="mt-0.5 truncate text-xs leading-4 text-slate-500">
               {document.source_filename || '系统文档'}
-              {formatDocumentDate(document.updated_at)
-                ? ` · 更新于 ${formatDocumentDate(document.updated_at)}`
+              {formatDocumentDate(document.verified_at || document.updated_at)
+                ? ` · 核验于 ${formatDocumentDate(document.verified_at || document.updated_at)}`
                 : ''}
             </p>
           </div>
@@ -475,6 +475,37 @@ function KnowledgeManager({
   onCancelDelete: () => void;
   onDelete: () => void;
 }) {
+  const hasChanges =
+    mode === 'upload'
+      ? Boolean(file || title.trim())
+      : Boolean(
+          document &&
+            (libraryId !== document.library_id ||
+              title !== document.title ||
+              content !== document.source_content)
+        );
+
+  useEffect(() => {
+    if (!hasChanges || saving) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [hasChanges, saving]);
+
+  const requestCancel = () => {
+    if (saving) return;
+    if (
+      hasChanges &&
+      !window.confirm('当前修改尚未保存。确定要放弃修改并关闭吗？')
+    ) {
+      return;
+    }
+    onCancel();
+  };
+
   if (loading) {
     return (
       <div className="space-y-4 p-5 md:p-7">
@@ -543,8 +574,7 @@ function KnowledgeManager({
               原文件、数据库正文及全部检索分段都会删除
             </p>
             <p className="mt-1 text-xs leading-5 text-red-800">
-              删除后 Agent
-              将不再检索到该文档。删除人、时间和文档摘要会保留在数据库审计记录中。
+              删除后系统将不再检索到该文档。删除人、时间和文档摘要会保留在数据库审计记录中。
             </p>
           </div>
         </div>
@@ -583,114 +613,128 @@ function KnowledgeManager({
   }
 
   return (
-    <form onSubmit={onSubmit} className="p-5 md:p-7">
-      <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-950">
-            {mode === 'upload' ? '上传知识文档' : '编辑知识文档'}
-          </h2>
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">
-            {mode === 'upload'
-              ? '支持图片、Markdown、PDF、TXT、DOC 和 DOCX。上传后先解析完整正文，再在后台建立检索索引。'
-              : '这里编辑的是完整解析正文。保存后会更新源内容并在后台重建检索索引。'}
-          </p>
-        </div>
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-          <IconX /> 关闭维护
-        </Button>
-      </div>
-
-      {document?.source_reconstructed && (
-        <div className="mt-5 flex items-start gap-3 rounded-lg bg-amber-50 p-4 text-xs leading-5 text-amber-950 ring-1 ring-amber-200">
-          <IconAlertTriangle size={17} className="mt-0.5 shrink-0" />
-          <p>
-            这是系统内置的旧文档，数据库未保存原始源文件；编辑器显示的是已有分段合并文本。首次保存后将成为可持续维护的数据库原文。
-          </p>
-        </div>
-      )}
-
-      <div className="mt-5 grid gap-5 sm:grid-cols-2">
-        <label className="block">
-          <span className="text-xs font-semibold text-slate-800">知识空间</span>
-          <select
-            value={libraryId}
-            onChange={(event) =>
-              onLibraryChange(event.target.value as RagLibrary['id'])
-            }
+    <form onSubmit={onSubmit} className="flex h-full min-h-0 flex-col bg-white">
+      <div className="min-h-0 flex-1 overflow-y-auto p-5 md:p-7">
+        <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold tracking-[-0.02em] text-slate-950">
+              {mode === 'upload' ? '上传知识文档' : '编辑知识文档'}
+            </h2>
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">
+              {mode === 'upload'
+                ? '支持图片、Markdown、PDF、TXT、DOC 和 DOCX。上传后先解析完整正文，再在后台建立检索索引。'
+                : '这里编辑的是完整解析正文。保存后会更新源内容并在后台重建检索索引。'}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
             disabled={saving}
-            className="mt-2 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus-visible:border-blue-600 focus-visible:ring-2 focus-visible:ring-blue-600/20 disabled:opacity-60"
+            onClick={requestCancel}
           >
-            {libraries.map((library) => (
-              <option key={library.id} value={library.id}>
-                {library.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-xs font-semibold text-slate-800">文档标题</span>
-          <Input
-            value={title}
-            onChange={(event) => onTitleChange(event.target.value)}
-            maxLength={160}
-            required
-            disabled={saving}
-            placeholder="例如：集团信用政策 2026"
-            className="mt-2 h-10 bg-white"
-          />
-          <span className="mt-1.5 block text-[11px] text-slate-500">
-            {title.length}/160
-          </span>
-        </label>
+            <IconX /> 关闭维护
+          </Button>
+        </div>
+
+        {document?.source_reconstructed && (
+          <div className="mt-5 flex items-start gap-3 rounded-lg bg-amber-50 p-4 text-xs leading-5 text-amber-950 ring-1 ring-amber-200">
+            <IconAlertTriangle size={17} className="mt-0.5 shrink-0" />
+            <p>
+              这是系统内置的旧文档，数据库未保存原始源文件；编辑器显示的是已有分段合并文本。首次保存后将成为可持续维护的数据库原文。
+            </p>
+          </div>
+        )}
+
+        <div className="mt-5 grid gap-5 sm:grid-cols-2">
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-800">
+              知识空间
+            </span>
+            <select
+              value={libraryId}
+              onChange={(event) =>
+                onLibraryChange(event.target.value as RagLibrary['id'])
+              }
+              disabled={saving}
+              className="mt-2 h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus-visible:border-blue-600 focus-visible:ring-2 focus-visible:ring-blue-600/20 disabled:opacity-60"
+            >
+              {libraries.map((library) => (
+                <option key={library.id} value={library.id}>
+                  {library.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-800">
+              文档标题
+            </span>
+            <Input
+              value={title}
+              onChange={(event) => onTitleChange(event.target.value)}
+              maxLength={160}
+              required
+              disabled={saving}
+              placeholder="例如：集团信用政策 2026"
+              className="mt-2 h-10 bg-white"
+            />
+            <span className="mt-1.5 block text-[11px] text-slate-500">
+              {title.length}/160
+            </span>
+          </label>
+        </div>
+
+        {mode === 'upload' ? (
+          <label className="mt-5 block">
+            <span className="text-xs font-semibold text-slate-800">源文件</span>
+            <Input
+              type="file"
+              accept=".png,.jpg,.jpeg,.md,.txt,.pdf,.doc,.docx,image/png,image/jpeg,text/markdown,text/plain,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              required
+              disabled={saving}
+              onChange={(event) =>
+                onFileChange(event.target.files?.[0] || null)
+              }
+              className="mt-2 h-auto min-h-11 cursor-pointer bg-white py-2 file:mr-3 file:cursor-pointer"
+            />
+            <span className="mt-1.5 block text-[11px] leading-5 text-slate-500">
+              单个文件不超过 10 MB；图片和扫描 PDF 会使用已配置的 OCR 解析。
+              {file ? ` 已选择：${file.name}` : ''}
+            </span>
+          </label>
+        ) : (
+          <label className="mt-5 block">
+            <span className="text-xs font-semibold text-slate-800">
+              完整解析正文
+            </span>
+            <Textarea
+              value={content}
+              onChange={(event) => onContentChange(event.target.value)}
+              required
+              disabled={saving}
+              maxLength={2_000_000}
+              className="mt-2 min-h-[360px] resize-y bg-white font-sans text-base leading-7 md:text-sm"
+              placeholder="这是用户阅读和后台检索共同使用的完整正文。"
+            />
+            <span className="mt-1.5 block text-[11px] text-slate-500 tabular-nums">
+              {content.length.toLocaleString('zh-CN')} / 2,000,000 字符
+            </span>
+          </label>
+        )}
+
+        {error && (
+          <div
+            role="alert"
+            className="mt-5 flex items-start gap-3 rounded-lg bg-red-50 p-4 text-xs leading-5 text-red-950 ring-1 ring-red-200"
+          >
+            <IconAlertTriangle size={17} className="mt-0.5 shrink-0" />
+            <p>{error}</p>
+          </div>
+        )}
       </div>
 
-      {mode === 'upload' ? (
-        <label className="mt-5 block">
-          <span className="text-xs font-semibold text-slate-800">源文件</span>
-          <Input
-            type="file"
-            accept=".png,.jpg,.jpeg,.md,.txt,.pdf,.doc,.docx,image/png,image/jpeg,text/markdown,text/plain,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            required
-            disabled={saving}
-            onChange={(event) => onFileChange(event.target.files?.[0] || null)}
-            className="mt-2 h-auto min-h-11 cursor-pointer bg-white py-2 file:mr-3 file:cursor-pointer"
-          />
-          <span className="mt-1.5 block text-[11px] leading-5 text-slate-500">
-            单个文件不超过 10 MB；图片和扫描 PDF 会使用已配置的 OCR 解析。
-            {file ? ` 已选择：${file.name}` : ''}
-          </span>
-        </label>
-      ) : (
-        <label className="mt-5 block">
-          <span className="text-xs font-semibold text-slate-800">
-            完整解析正文
-          </span>
-          <Textarea
-            value={content}
-            onChange={(event) => onContentChange(event.target.value)}
-            required
-            disabled={saving}
-            maxLength={2_000_000}
-            className="mt-2 min-h-[360px] resize-y bg-white font-sans text-base leading-7 md:text-sm"
-            placeholder="这是用户阅读和 RAG 建索引共同使用的完整正文。"
-          />
-          <span className="mt-1.5 block text-[11px] text-slate-500 tabular-nums">
-            {content.length.toLocaleString('zh-CN')} / 2,000,000 字符
-          </span>
-        </label>
-      )}
-
-      {error && (
-        <div
-          role="alert"
-          className="mt-5 flex items-start gap-3 rounded-lg bg-red-50 p-4 text-xs leading-5 text-red-950 ring-1 ring-red-200"
-        >
-          <IconAlertTriangle size={17} className="mt-0.5 shrink-0" />
-          <p>{error}</p>
-        </div>
-      )}
-
-      <div className="mt-6 flex flex-col-reverse gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="z-10 flex shrink-0 flex-col-reverse gap-3 border-t border-slate-200 bg-white px-5 py-4 shadow-[0_-12px_28px_-24px_rgba(15,23,42,.65)] sm:flex-row sm:items-center sm:justify-between md:px-7">
         <div>
           {mode === 'edit' && (
             <Button
@@ -704,29 +748,54 @@ function KnowledgeManager({
             </Button>
           )}
         </div>
-        <div className="flex gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={saving}
-            onClick={onCancel}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <p
+            aria-live="polite"
+            className={`text-xs font-medium ${
+              mode === 'edit' && hasChanges
+                ? 'text-amber-700'
+                : 'text-slate-500'
+            }`}
           >
-            取消
-          </Button>
-          <Button type="submit" disabled={saving}>
-            {saving ? (
-              <IconLoader2 className="animate-spin" />
-            ) : mode === 'upload' ? (
-              <IconUpload />
-            ) : (
-              <IconCheck />
-            )}
             {saving
-              ? '正在解析并建索引'
+              ? mode === 'upload'
+                ? '正在解析文档并建立检索索引'
+                : '正在保存正文并重建检索索引'
               : mode === 'upload'
-                ? '上传并解析'
-                : '保存并重建索引'}
-          </Button>
+                ? '上传后将保存原文并建立检索索引'
+                : hasChanges
+                  ? '有未保存的修改'
+                  : '当前内容已保存'}
+          </p>
+          <div className="flex gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={saving}
+              onClick={requestCancel}
+            >
+              取消
+            </Button>
+            <Button
+              type="submit"
+              disabled={saving || (mode === 'edit' && !hasChanges)}
+            >
+              {saving ? (
+                <IconLoader2 className="animate-spin" />
+              ) : mode === 'upload' ? (
+                <IconUpload />
+              ) : (
+                <IconDeviceFloppy />
+              )}
+              {saving
+                ? mode === 'upload'
+                  ? '正在解析并建索引'
+                  : '正在保存并重建索引'
+                : mode === 'upload'
+                  ? '上传并解析'
+                  : '保存并重建索引'}
+            </Button>
+          </div>
         </div>
       </div>
     </form>
@@ -878,8 +947,8 @@ export function KnowledgeBase() {
     setDraftLibraryId(
       library?.accessible && !library.read_only
         ? library.id
-        : catalog?.libraries.find((item) => item.accessible && !item.read_only)?.id ||
-            'policy'
+        : catalog?.libraries.find((item) => item.accessible && !item.read_only)
+            ?.id || 'policy'
     );
     setDraftTitle('');
     setDraftContent('');
@@ -1095,6 +1164,13 @@ export function KnowledgeBase() {
             <p className="mt-1.5 text-[13px] leading-5 text-slate-500">
               查阅制度、公开资料与历史案件原文
             </p>
+            {catalog.active_release.id && (
+              <p className="mt-1 text-xs text-slate-500 tabular-nums">
+                当前知识版本 {catalog.active_release.id} ·{' '}
+                {catalog.active_release.document_count} 份文档 ·{' '}
+                {catalog.active_release.chunk_count} 个检索片段
+              </p>
+            )}
           </div>
         </div>
         <div className="flex flex-col items-start gap-2.5 sm:items-end">
@@ -1113,29 +1189,34 @@ export function KnowledgeBase() {
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {catalog.can_manage && document && !document.read_only && !managerMode && !(
-              document.libraryId === 'proposed_rule' || document.libraryId === 'evidence_spec'
-            ) && (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={openEdit}
-                >
-                  <IconEdit /> 编辑文档
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="text-red-700 hover:border-red-200 hover:bg-red-50 hover:text-red-800"
-                  onClick={openDelete}
-                >
-                  <IconTrash /> 删除文档
-                </Button>
-              </>
-            )}
+            {catalog.can_manage &&
+              document &&
+              !document.read_only &&
+              !managerMode &&
+              !(
+                document.libraryId === 'proposed_rule' ||
+                document.libraryId === 'evidence_spec'
+              ) && (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={openEdit}
+                  >
+                    <IconEdit /> 编辑文档
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-red-700 hover:border-red-200 hover:bg-red-50 hover:text-red-800"
+                    onClick={openDelete}
+                  >
+                    <IconTrash /> 删除文档
+                  </Button>
+                </>
+              )}
             {catalog.can_manage && (
               <Button type="button" size="sm" onClick={openUpload}>
                 <IconUpload /> 上传文档

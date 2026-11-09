@@ -1,5 +1,7 @@
 # 系统架构与数据契约
 
+> 本文同时包含当前实现与 P0 目标模型。未标明“当前”的新增账本对象均是 P0 需求，不得宣称已经落库。
+
 ## 1. 架构
 
 ```text
@@ -34,23 +36,23 @@ Persistence
 
 ## 3. 核心数据对象
 
-| 对象              | 作用                | 关键字段                                                |
-| ----------------- | ------------------- | ------------------------------------------------------- |
-| cases             | 案件主记录          | case_id, BP, review_cycle, owner, status, current_stage |
-| source_files      | 原始文件与版本      | type, path, checksum, version, immutable                |
-| excel_imports     | Excel 解析快照      | template_version, parsed_json, issues, imported_at      |
-| entity_candidates | 企业候选            | source, external_id, score, matched_fields              |
-| entity_binding    | 人工确认的主体      | BP, DUNS/LEI, approver, timestamp                       |
-| financial_values  | 21 个财务字段       | period, value, currency, source_page, status, edited_by |
-| workflow_runs     | Agent 运行          | state, started_at, stopped_at, current_step             |
-| workflow_steps    | 可恢复步骤          | input_hash, attempt, result, validation, status         |
-| human_tasks       | 人工关卡            | type, assignee, status, payload, resolved_at            |
-| artifacts         | 草稿、Excel、审计包 | type, version, checksum, parent_id                      |
-| signoffs          | 内容签署            | type, user, role, content_hash, declaration             |
-| agent_events      | 用户可见事件        | event_type, summary, source_refs, created_at            |
-| bad_cases         | 质量回流            | error_type, exposure, impact, priority, root_cause, fix |
-| knowledge_sources | RAG 文档            | namespace, version, effective dates, authority          |
-| knowledge_chunks  | 可引用分块          | source_id, section, page, text, metadata, embedding_id  |
+| 对象              | 作用                | 关键字段                                                | 状态 |
+| ----------------- | ------------------- | ------------------------------------------------------- | --- |
+| cases             | 案件主记录          | case_id, BP, review_cycle, owner, status, current_stage | 当前 |
+| source_files      | 原始文件与版本      | type, path, checksum, version, immutable                | 部分实现，P0 统一 |
+| excel_imports     | Excel 解析快照      | template_version, parsed_json, issues, imported_at      | 当前 |
+| entity_candidates | 企业候选            | source, external_id, score, matched_fields              | 当前 |
+| entity_binding    | 人工确认的主体      | BP, DUNS/LEI, approver, timestamp                       | 当前数据存在，P0 补签署引用 |
+| financial_values  | 21 个财务字段       | period, value, currency, source_page, status, edited_by | 当前数据存在，P0 补不可变 snapshot |
+| workflow_runs     | Agent 运行          | state, started_at, stopped_at, current_step             | P0 事实账本 |
+| workflow_steps    | 可恢复步骤          | operation_id, input_hash, attempt, result_ref, validation, status | P0 事实账本 |
+| human_tasks       | 人工关卡            | type, assignee, status, payload, resolved_at            | 当前 |
+| artifacts         | 草稿、Excel、审计包 | type, version, checksum, parent_id                      | P0 事实账本 |
+| signoffs          | 内容签署            | subject/version/hash, user, role, declaration, status  | P0 事实账本 |
+| agent_events      | 用户可见事件        | event_type, summary, source_refs, created_at            | 当前投影，不作事实账本 |
+| bad_cases         | 质量回流            | error_type, exposure, impact, priority, root_cause, fix | 当前，P0 补闭环 |
+| knowledge_sources | RAG 文档            | namespace, version, effective dates, authority          | 当前部分字段；生产元数据待补 |
+| knowledge_chunks  | 可引用分块          | source_id, section, page, text, metadata, embedding_id  | 当前 |
 
 ## 4. Excel 契约
 
@@ -62,19 +64,14 @@ Persistence
 
 ### 预期 Sheet
 
-- `TCURR`
 - 隐藏 `Lists`
-- 回填后的 `AI Import`
+- 回填后的 `Review Evidence`
 
-### 年份开关
+汇率不再通过用户可见的 Excel Sheet 交接，由后端的结构化汇率快照按案件日期读取。
 
-`Financial Statements!C2:E2` 只接受：
+### 年份列
 
-- `Yes - Bring in Prior Year Financials`
-- `No - Enter Manually`
-- `No Action Needed`
-
-当期手工年份必须为 C 列。至少一个手工年份。标记为 SAP 历史的年份必须有数值。
+`Financial Statements` 固定使用 C 列作为本期、D/E 列作为两期历史数据，不再要求用户操作年份开关。C5:E5 填报表期间，C6:E6 填币种；有历史期间时，对应列必须包含财务数据。
 
 ### 重要单元格
 
@@ -88,9 +85,10 @@ Persistence
 ### 版本和不可变性
 
 - 每次上传计算 SHA-256。
-- 原上传文件不覆盖。
-- 更正后的重新上传建立新版本并展示差异。
-- 影响已签署内容的更改会使对应签署失效。
+- 当前上传保留 SHA-256；模拟导出使用 vN 文件名、checksum 和 superseded 状态，不静默覆盖旧结果。
+- 生产 artifact 独立表、父子关系和对象存储不可变保留策略仍待迁移。
+- 影响已签署内容的更改会使依赖签署、评分和 current artifact 失效，并要求重签/重算。
+- 数据类型、索引和迁移编号为 `[需复核：P0 最终数据字典与数据库迁移版本]`。
 
 ## 5. 21 个财务字段
 

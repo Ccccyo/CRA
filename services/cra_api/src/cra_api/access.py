@@ -130,11 +130,10 @@ def knowledge_catalog(
             or metadata.get("is_published") is not True
         ):
             continue
-        if demo_release_id and principal["role"] not in {"admin", "super_admin"}:
+        if demo_release_id:
             if (
                 metadata.get("demo_release_id") != demo_release_id
                 or metadata.get("is_published") is not True
-                or (source_document.get("library_id") == "case_history" and not is_case_archive)
             ):
                 continue
         library_id = source_document.get("library_id") or source_type(
@@ -160,11 +159,23 @@ def knowledge_catalog(
             "document_version": metadata.get("document_version") or "",
             "effective_from": metadata.get("effective_from") or "",
             "effective_to": metadata.get("effective_to") or "",
-            "read_only": metadata.get("managed_by") == "case_knowledge.py",
+            "authority": metadata.get("authority") or "",
+            "verified_at": metadata.get("verified_at") or "",
+            "source_as_of": metadata.get("source_as_of") or "",
+            "refresh_interval_days": metadata.get("refresh_interval_days"),
+            "read_only": bool(metadata.get("managed_by")),
         }
 
     libraries: List[Dict[str, Any]] = []
-    for definition in LIBRARIES:
+    visible_definitions = [
+        definition for definition in LIBRARIES
+        if not (
+            demo_release_id
+            and definition["id"] in {"proposed_rule", "evidence_spec"}
+            and not documents[definition["id"]]
+        )
+    ]
+    for definition in visible_definitions:
         library_id = definition["id"]
         accessible = library_id in access and (
             library_id not in {"proposed_rule", "evidence_spec"}
@@ -186,5 +197,11 @@ def knowledge_catalog(
         "principal": principal,
         "permission_model": "role_based",
         "granted_library_count": sum(1 for item in libraries if item["accessible"]),
+        "active_release": {
+            "id": demo_release_id,
+            "document_count": sum(len(items) for items in documents.values()),
+            "chunk_count": sum(chunk_totals.values()),
+            "status": "published" if demo_release_id else "unversioned",
+        },
         "libraries": libraries,
     }

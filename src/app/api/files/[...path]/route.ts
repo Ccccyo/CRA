@@ -224,7 +224,9 @@ async function initUpload(request: NextRequest, user: { id: string }) {
   const fileId = randomUUID();
   const sessionId = randomUUID();
   const objectKey = `cra/${body.purpose}/${new Date().toISOString().slice(0, 7).replace('-', '/')}/${fileId}`;
-  const expiresAt = new Date(Date.now() + config.uploadTtlSeconds * 1000);
+  const expiresAt = new Date(
+    Date.now() + config.uploadTtlSeconds * 1000
+  ).toISOString();
   await db().transaction(async (tx: ReturnType<typeof db>) => {
     await tx.execute(sql`
       INSERT INTO cra_file_object

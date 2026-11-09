@@ -1,13 +1,10 @@
-"""Mock CRA Excel（演示用，结构从简）：AI 写黄色格子 → 助手内查看/编辑 → 模拟 Run Macro 回填结果。
-
-同一份文件来回走：Excel 宏从 SAP 拉完数据 → 上传到助手 → 助手在同一份文件的黄色格子里填 AI 结果 → 下载回 Excel。
+"""CRA Excel 演示模板：上传建案 → 复核财务与风险意见 → 回填评审结果。
 
 工作表：
-- Financial Statements：三年开关（C2:E2）+ 本年（AI 抽取，待确认）+ 往年两列（宏从 SAP 导出）
-- Executive Summary：BP、客户、申请额度；定性评分、额度方法、意见；Run Macro 的结果回填在这里
-- Header params：客户地址、分析师填写项、SAP 应收的付款记录、导出信息（键 / 值）
-- TCURR：汇率（宏从 SAP 表 TCURR 导出）
-- AI Import：AI 填写后才有，每个数字的出处、模型自评、校验提示（审计用；VBA Import AI 读这张表）
+- Financial Statements：本期财务与两期历史财务
+- Executive Summary：案件信息、人工判断、评分与风险意见
+- Header params：系统读取的案件元数据，默认隐藏
+- Review Evidence：回填后生成的字段来源和校验记录
 保留与真实文件同名的命名单元格（BP、ENDDATE、PayHabits、Score…），VBA 宏按这些名字读值。
 样式只用一种淡黄色标「待人工确认」，有校验提示的格子用红字 + 批注。
 """
@@ -39,15 +36,16 @@ YEAR_OPTIONS = ["Yes - Bring in Prior Year Financials", "No - Enter Manually", "
 CL_METHODS = ["A. % Tangible Net Worth", "C. % Net Worth"]
 YEAR_COLS = ["C", "D", "E"]  # Current Year / Prior Year / Prior Year - 1
 
-FS_SHEET, ES_SHEET, AI_SHEET = "Financial Statements", "Executive Summary", "AI Import"
+FS_SHEET, ES_SHEET, AI_SHEET = "Financial Statements", "Executive Summary", "Review Evidence"
+LEGACY_AI_SHEET = "AI Import"
 HEADER_SHEET, TCURR_SHEET = "Header params", "TCURR"
-TEMPLATE_VERSION = "CRA-2026.1"
+TEMPLATE_VERSION = "CRA-2026.3"
 # Header params 的键 → 说明
 HEADER_KEYS = {
     "TemplateVersion": "模板版本", "ExportedAt": "宏导出时间", "ExportedBy": "导出人",
     "CustomerName": "客户名称（SAP 主数据）", "Country": "国家代码", "State": "州 / 省", "City": "城市",
     "Business": "业务说明（分析师填写）", "CompanyTypeHint": "公司类型线索（分析师填写）",
-    "CustomerDistinction": "战略重要性（商务部门）", "SovereignHint": "国家风险线索（可空，助手会查 OECD）",
+    "CustomerDistinction": "战略重要性（商务部门）", "SovereignHint": "国家风险线索（可空）",
     "PayHabitsFromAR": "付款习惯档位（SAP 应收）", "PayHabitsDetail": "付款记录说明（SAP 应收）",
 }
 FIRST_FIELD_ROW = 10
@@ -56,8 +54,8 @@ BALANCE_ROW = FIRST_FIELD_ROW + len(KEY_FIELDS) + 1
 
 # Executive Summary 版面
 QUAL_ROW = {"pay_habits": 8, "company_type": 9, "sovereign_rating": 10, "customer_distinction": 11}
-QUAL_LABEL = {"pay_habits": "Twelve Months Pay Habits", "company_type": "Company Type",
-              "sovereign_rating": "Sovereign Rating", "customer_distinction": "Customer Distinction"}
+QUAL_LABEL = {"pay_habits": "近 12 个月付款表现", "company_type": "企业类型",
+              "sovereign_rating": "国家风险", "customer_distinction": "客户重要性"}
 QUAL_NAME = {"pay_habits": "PayHabits", "company_type": "CompanyType", "sovereign_rating": "SovereignRating",
              "customer_distinction": "CustomerDistinction"}
 RATING_ROW = 12
@@ -77,35 +75,25 @@ def _name(wb: Workbook, name: str, sheet: str, cell: str) -> None:
     wb.defined_names[name] = DefinedName(name, attr_text=f"'{sheet}'!${col}${row}")
 
 
-def _dropdown(ws, cell: str, ref: str) -> None:
-    dv = DataValidation(type="list", formula1=f"={ref}")
+def _dropdown(ws, cell: str, options: List[str]) -> None:
+    """把短选项直接写入数据验证，避免向用户暴露辅助 Lists 工作表。"""
+    if any("," in option for option in options):
+        raise ValueError("Inline dropdown options must not contain commas")
+    formula = '"' + ",".join(options) + '"'
+    if len(formula) > 255:
+        raise ValueError("Inline dropdown options exceed Excel's 255-character limit")
+    dv = DataValidation(type="list", formula1=formula)
     ws.add_data_validation(dv)
     dv.add(ws[cell])
 
 
-def _lists(wb: Workbook) -> Dict[str, str]:
-    """隐藏的 Lists 表放下拉选项，返回 {名称: 引用}。"""
-    ws = wb.create_sheet("Lists")
-    ws.sheet_state = "hidden"
-    groups = {"year": YEAR_OPTIONS, "method": CL_METHODS, **QUALITATIVE_OPTIONS}
-    refs = {}
-    for c, (key, opts) in enumerate(groups.items(), 1):
-        letter = chr(ord("A") + c - 1)
-        ws.cell(row=1, column=c, value=key)
-        for r, v in enumerate(opts, 2):
-            ws.cell(row=r, column=c, value=v)
-        refs[key] = f"Lists!${letter}$2:${letter}${len(opts) + 1}"
-    return refs
+def _dropdown_options() -> Dict[str, List[str]]:
+    return {"method": CL_METHODS, **QUALITATIVE_OPTIONS}
 
 
-def _financial_statements(wb: Workbook, refs: Dict[str, str], case: Optional[Case], periods: List[str]) -> None:
+def _financial_statements(wb: Workbook, case: Optional[Case], periods: List[str]) -> None:
     ws = wb.create_sheet(FS_SHEET)
-    ws["A1"], ws["A1"].font = "Financial Statements（MOCK）", TITLE
-    ws["A2"] = "Export Existing Financials from SAP?"
-    defaults = ["No - Enter Manually"] + ["Yes - Bring in Prior Year Financials"] * 2
-    for col, default in zip(YEAR_COLS, defaults):
-        ws[f"{col}2"] = default
-        _dropdown(ws, f"{col}2", refs["year"])
+    ws["A1"], ws["A1"].font = "Financial Statements / 财务数据", TITLE
     labels = {3: "Bus. Partner", 4: "Crd. Segment", 5: "St. End Date", 6: "Stmt Currency", 7: "来源"}
     for row, label in labels.items():
         ws[f"A{row}"] = label
@@ -120,62 +108,61 @@ def _financial_statements(wb: Workbook, refs: Dict[str, str], case: Optional[Cas
         if i < len(periods):
             ws[f"{col}5"] = periods[i]
             ws[f"{col}6"] = case.statement_currency if case else ""
-            ws[f"{col}7"] = "AI 抽取（待确认）" if i == 0 else "SAP 导出（宏）"
+            ws[f"{col}7"] = "本期财报（待核对）" if i == 0 else "历史交接数据"
 
-    for c, h in enumerate(["科目", "field_code", "Current Year", "Prior Year", "Prior Year - 1"], 1):
+    for c, h in enumerate(["科目", "", "本期", "上期", "上上期"], 1):
         cell = ws.cell(row=FIRST_FIELD_ROW - 1, column=c, value=h)
         cell.font, cell.border = BOLD, UNDERLINE
     for code, row in FIELD_ROW.items():
         ws[f"A{row}"] = FIELD_LABELS[code]
-        ws[f"B{row}"] = code
-        ws[f"B{row}"].font = Font(color="808080", size=9)
         for col in YEAR_COLS:
             ws[f"{col}{row}"].number_format = "#,##0"
     ta, tl, te = FIELD_ROW["total_assets"], FIELD_ROW["total_liabilities"], FIELD_ROW["total_equity"]
-    ws[f"A{BALANCE_ROW}"], ws[f"A{BALANCE_ROW}"].font = "Balance Sheet Check", BOLD
+    ws[f"A{BALANCE_ROW}"], ws[f"A{BALANCE_ROW}"].font = "资产负债校验", BOLD
     for col in YEAR_COLS:
         ws[f"{col}{BALANCE_ROW}"] = (f'=IF({col}{ta}="","",IF(ABS({col}{ta}-({col}{tl}+{col}{te}))'
                                      f'<=0.005*ABS({col}{ta}),"OK","CHECK"))')
     for col, w in zip("ABCDE", (22, 26, 18, 18, 18)):
         ws.column_dimensions[col].width = w
+    ws.column_dimensions["B"].hidden = True
     ws.freeze_panes = f"C{FIRST_FIELD_ROW}"
 
 
-def _executive_summary(wb: Workbook, refs: Dict[str, str], case: Optional[Case]) -> None:
+def _executive_summary(wb: Workbook, options: Dict[str, List[str]], case: Optional[Case]) -> None:
     ws = wb.create_sheet(ES_SHEET)
-    ws["A1"], ws["A1"].font = "Executive Summary（MOCK）", TITLE
-    ws["A3"], ws["B3"] = "Bus. Partner", case.bp if case else None
+    ws["A1"], ws["A1"].font = "Credit Review Summary / 信用评审摘要", TITLE
+    ws["A3"], ws["B3"] = "BP", case.bp if case else None
     ws["A4"], ws["B4"] = "客户", case.customer["name"] if case else None
-    ws["A5"], ws["B5"] = "Requested CL (USD)", case.requested_cl_usd if case else None
+    ws["A5"], ws["B5"] = "申请额度（USD）", case.requested_cl_usd if case else None
     ws["B5"].number_format = "#,##0"
 
-    ws["A7"], ws["A7"].font = "定性评分（分析师选择）", BOLD
-    ws["C7"], ws["C7"].font = "AI 建议 / 理由", BOLD
+    ws["A7"], ws["A7"].font = "定性判断（人工确认）", BOLD
+    ws["C7"], ws["C7"].font = "依据 / 说明", BOLD
     for key, row in QUAL_ROW.items():
         ws[f"A{row}"] = QUAL_LABEL[key]
-        _dropdown(ws, f"B{row}", refs[key])
+        _dropdown(ws, f"B{row}", options[key])
         ws[f"C{row}"].alignment = WRAP
         _name(wb, QUAL_NAME[key], ES_SHEET, f"B{row}")
-    ws[f"A{RATING_ROW}"] = "Corporate Credit Risk Rating"
-    ws[f"C{RATING_ROW}"] = "按 D&B 评级查表，不由 AI 判断"
+    ws[f"A{RATING_ROW}"] = "D&B 信用评级"
+    ws[f"C{RATING_ROW}"] = "按已确认的 D&B 评级映射"
     _name(wb, "CorporateCreditRiskRating", ES_SHEET, f"B{RATING_ROW}")
-    ws[f"A{DUNS_ROW}"] = "D&B DUNS（助手里已 Merge）"
-    ws[f"C{DUNS_ROW}"] = "Import AI 时一并写入，供 VBA 核对 eRAM 绑定"
+    ws[f"A{DUNS_ROW}"] = "已确认的 D&B DUNS"
+    ws[f"C{DUNS_ROW}"] = "用于核对客户主体绑定"
     _name(wb, "DUNS", ES_SHEET, f"B{DUNS_ROW}")
 
-    ws["A14"], ws["A14"].font = "Run Macro 结果（演示中为模拟，真实流程由 SAP 回填）", BOLD
-    titles = {"financial": "Financial Score (70%)", "qualitative": "Qualitative Score (30%)",
-              "overall": "Overall Risk Rating Score", "risk_class": "Risk Category",
-              "method": "Credit Limit Calculation Method", "suggested_cl": "Suggested Credit Limit (USD)",
+    ws["A14"], ws["A14"].font = "评审结果", BOLD
+    titles = {"financial": "财务评分（70%）", "qualitative": "定性评分（30%）",
+              "overall": "综合风险评分", "risk_class": "风险等级",
+              "method": "额度计算方法", "suggested_cl": "建议额度（USD）",
               "approval": "审批层级"}
     for key, row in RESULT_ROWS.items():
         ws[f"A{row}"] = titles[key]
     ws[f"B{RESULT_ROWS['method']}"] = CL_METHODS[0]
-    _dropdown(ws, f"B{RESULT_ROWS['method']}", refs["method"])
+    _dropdown(ws, f"B{RESULT_ROWS['method']}", options["method"])
     ws[f"B{RESULT_ROWS['suggested_cl']}"].number_format = "#,##0"
     _name(wb, "Score", ES_SHEET, f"B{RESULT_ROWS['overall']}")
 
-    for row, title in ((DESC_ROW - 1, "Company Description"), (RISK_ROW - 1, "Risk Comments - Used for SCASE")):
+    for row, title in ((DESC_ROW - 1, "企业概况"), (RISK_ROW - 1, "风险意见")):
         ws[f"A{row}"], ws[f"A{row}"].font = title, BOLD
         ws.merge_cells(f"A{row + 1}:C{row + 1}")
         ws[f"A{row + 1}"].alignment = WRAP
@@ -206,33 +193,20 @@ def _header_params(wb: Workbook, case: Optional[Case], exported_by: str) -> None
         ws.append([k, values.get(k, ""), note])
     for col, w in zip("ABC", (22, 44, 36)):
         ws.column_dimensions[col].width = w
-
-
-def _tcurr(wb: Workbook, fx: Optional[Dict]) -> None:
-    ws = wb.create_sheet(TCURR_SHEET)
-    ws.append(["currency", "valid_date", "units_per_usd"])
-    for c in ws[1]:
-        c.font, c.border = BOLD, UNDERLINE
-    for (ccy, d), rate in sorted((fx or {}).items()):
-        ws.append([ccy, d, rate])
+    ws.sheet_state = "hidden"
 
 
 def build_mock_workbook(case: Optional[Case] = None, sap_values: Optional[Values] = None,
                         periods: Optional[List[str]] = None, switches: Optional[List[str]] = None,
                         fx: Optional[Dict] = None, exported_by: str = "analyst@example.com") -> Workbook:
-    """空白模板，或「宏已从 SAP 拉完数据」的工作簿：抬头、三年开关、往年财报、客户信息、汇率都填好，本年度留空等 AI 填。"""
+    """空白模板或带历史财务的交接工作簿；本期数据留空等待后续核对。"""
     wb = Workbook()
     wb.remove(wb.active)
-    refs = _lists(wb)
+    options = _dropdown_options()
     periods = periods or ([case.new_period] + sorted(sap_values or {}, reverse=True)[:2] if case else [])
-    _financial_statements(wb, refs, case, periods)
-    _executive_summary(wb, refs, case)
+    _financial_statements(wb, case, periods)
+    _executive_summary(wb, options, case)
     _header_params(wb, case, exported_by)
-    _tcurr(wb, fx)
-    if switches:
-        for col, sw in zip(YEAR_COLS, switches):
-            wb[FS_SHEET][f"{col}2"] = sw
-    wb.move_sheet(wb["Lists"], offset=len(wb.sheetnames) - 1)  # 隐藏的 Lists 放最后
     if sap_values:
         ws = wb[FS_SHEET]
         for col, period in zip(YEAR_COLS[1:], periods[1:]):
@@ -243,7 +217,8 @@ def build_mock_workbook(case: Optional[Case] = None, sap_values: Optional[Values
 
 def fill_ai_results(wb: Workbook, extracted: List[ExtractedValue], flags: List[Flag], new_period: str,
                     qualitative: Dict[str, Dict[str, str]], company_description: str, risk_comments: str,
-                    dnb_rating: str, model_name: str, dnb_duns: str = "") -> None:
+                    dnb_rating: str, model_name: str, dnb_duns: str = "",
+                    data_mode: str = "non_mock") -> None:
     """AI 结果写进待确认格子（淡黄）；有校验提示的红字 + 批注；并生成 AI Import 审计表。"""
     ws = wb[FS_SHEET]
     flagged = {f.field: f for f in flags}
@@ -254,29 +229,31 @@ def fill_ai_results(wb: Workbook, extracted: List[ExtractedValue], flags: List[F
         cell.value, cell.fill = (v.normalized if v else None), INPUT
         notes = []
         if v is not None:
-            notes.append(f"第 {v.page} 页：{v.source_text or '（无原文）'}（模型自评 {v.confidence}）")
+            notes.append(f"第 {v.page} 页：{v.source_text or '（无原文）'}（置信度 {v.confidence}）")
             if v.note:
                 notes.append(v.note)
         if code in flagged:
             notes.append("⚠ " + flagged[code].message)
             cell.font = RED
         if notes:
-            cell.comment = Comment("\n".join(notes), "AI 助手", width=300, height=100)
+            cell.comment = Comment("\n".join(notes), "CRA Workbench", width=300, height=100)
 
     es = wb[ES_SHEET]
     for key, row in QUAL_ROW.items():
         q = qualitative.get(key, {})
-        es[f"B{row}"], es[f"B{row}"].fill = q.get("final"), INPUT
-        es[f"C{row}"] = f"{q['ai']}：{q.get('reason', '')}" if q.get("ai") else None
+        choice = q.get("choice") or q.get("final") or q.get("ai")
+        es[f"B{row}"], es[f"B{row}"].fill = choice, INPUT
+        es[f"C{row}"] = q.get("reason") or None
     es[f"B{RATING_ROW}"] = dnb_rating
     es[f"B{DUNS_ROW}"] = dnb_duns or None
     es[f"A{DESC_ROW}"], es[f"A{RISK_ROW}"] = company_description, risk_comments
     es[f"A{DESC_ROW}"].fill = es[f"A{RISK_ROW}"].fill = INPUT
 
-    if AI_SHEET in wb.sheetnames:  # 同一份文件再填一次：换掉上一版的审计表
-        del wb[AI_SHEET]
+    for sheet_name in (AI_SHEET, LEGACY_AI_SHEET):
+        if sheet_name in wb.sheetnames:
+            del wb[sheet_name]
     ai = wb.create_sheet(AI_SHEET, index=len(wb.sheetnames) - 1)
-    headers = ["field_code", "科目", "期间", "数值", "页码", "原文", "模型自评", "校验提示", "写入位置"]
+    headers = ["field_code", "科目", "期间", "数值", "页码", "原文", "置信度", "校验提示", "写入位置"]
     for c, h in enumerate(headers, 1):
         cell = ai.cell(row=1, column=c, value=h)
         cell.font, cell.border = BOLD, UNDERLINE
@@ -287,6 +264,10 @@ def fill_ai_results(wb: Workbook, extracted: List[ExtractedValue], flags: List[F
                    v.source_text, v.confidence, f.message if f else "", target])
     ai.append([])
     ai.append([f"模型：{model_name} · 生成时间：{datetime.now():%Y-%m-%d %H:%M}"])
+    if data_mode == "mock_demo":
+        ai.append(["数据模式", "模拟演示；非真实授信依据"])
+        for sheet_name in (FS_SHEET, ES_SHEET):
+            wb[sheet_name].oddHeader.center.text = "模拟演示；非真实授信依据"
     for col, w in zip("ABCDEFGHI", (24, 14, 12, 16, 6, 48, 8, 40, 30)):
         ai.column_dimensions[col].width = w
     ai.freeze_panes = "A2"
@@ -314,7 +295,10 @@ def read_workbook(path: Path) -> Dict:
         "method": es[f"B{RESULT_ROWS['method']}"].value,
         "results": {k: es[f"B{r}"].value for k, r in RESULT_ROWS.items() if k != "method"},
         "desc": es[f"A{DESC_ROW}"].value or "", "risk": es[f"A{RISK_ROW}"].value or "",
-        "ai_rows": [[c.value for c in row] for row in wb[AI_SHEET].iter_rows(min_row=1)] if AI_SHEET in wb.sheetnames else [],
+        "ai_rows": [[c.value for c in row] for row in wb[AI_SHEET].iter_rows(min_row=1)] if AI_SHEET in wb.sheetnames else (
+            [[c.value for c in row] for row in wb[LEGACY_AI_SHEET].iter_rows(min_row=1)]
+            if LEGACY_AI_SHEET in wb.sheetnames else []
+        ),
     }
 
 

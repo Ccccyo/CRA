@@ -64,6 +64,9 @@ export function NewCaseForm() {
     }
   };
 
+  const checking = busy && !preview;
+  const ready = Boolean(preview?.valid);
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-7 md:px-7 md:py-9">
       <button
@@ -77,10 +80,6 @@ export function NewCaseForm() {
           <h1 className="text-2xl font-semibold tracking-[-0.03em] md:text-3xl">
             新建信用评审案件
           </h1>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            上传完整的 CRA Excel，系统会读取案件与 SAP
-            交接数据，不会修改原文件。
-          </p>
         </div>
         <a
           href={`${API_URL}/samples/northstar`}
@@ -90,17 +89,34 @@ export function NewCaseForm() {
         </a>
       </div>
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-[1.3fr_.7fr]">
+      <ol className="mt-7 grid grid-cols-2 overflow-hidden rounded-xl bg-white ring-1 ring-slate-200">
+        {[
+          ['1', '上传并检查', !ready],
+          ['2', '确认并创建', ready],
+        ].map(([number, label, active]) => (
+          <li
+            key={String(number)}
+            aria-current={active ? 'step' : undefined}
+            className={`flex items-center gap-3 px-4 py-3 text-sm font-medium md:px-5 ${active ? 'bg-blue-50 text-blue-800' : 'text-slate-500'}`}
+          >
+            <span
+              className={`grid size-6 place-items-center rounded-full text-xs font-semibold ${active ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-500'}`}
+            >
+              {number}
+            </span>
+            {label}
+          </li>
+        ))}
+      </ol>
+
+      <div className="mt-5">
         <section className="min-w-0 rounded-2xl bg-white p-5 shadow-[0_8px_28px_-22px_rgba(15,23,42,.35)] ring-1 ring-slate-200 md:p-7">
           <div className="mb-5 flex items-center gap-3">
             <span className="grid size-9 place-items-center rounded-xl bg-blue-50 text-blue-700">
               <IconFileSpreadsheet size={20} />
             </span>
             <div>
-              <h2 className="text-sm font-semibold">上传 CRA Excel</h2>
-              <p className="mt-0.5 text-xs text-slate-500">
-                系统先预检，确认后才建案。
-              </p>
+              <h2 className="text-sm font-semibold">上传 Excel</h2>
             </div>
           </div>
 
@@ -126,8 +142,8 @@ export function NewCaseForm() {
                   拖入文件，或点击选择
                 </p>
                 <p className="mt-2 max-w-md text-xs leading-5 break-words text-slate-500">
-                  仅支持 .xlsx。需包含 Financial Statements、Executive Summary
-                  和 Header params。
+                  仅支持 .xlsx。模板需包含 Financial Statements 和 Executive
+                  Summary。
                 </p>
               </div>
             </label>
@@ -159,10 +175,10 @@ export function NewCaseForm() {
                   <IconX size={18} />
                 </button>
               </div>
-              {busy && !preview ? (
+              {checking ? (
                 <div className="mt-5 flex items-center gap-3 rounded-xl bg-blue-50 p-4 text-sm text-blue-800">
                   <IconLoader2 size={19} className="animate-spin" />{' '}
-                  正在检查工作表、年份开关和 SAP 数据…
+                  正在核对模板、案件信息和历史财务…
                 </div>
               ) : preview ? (
                 <div className="mt-5 space-y-4">
@@ -180,19 +196,20 @@ export function NewCaseForm() {
                       </p>
                       <p className="mt-1 text-xs leading-5 opacity-80">
                         {preview.valid
-                          ? '关键字段与年份开关已读取。'
+                          ? '案件信息已读取，请确认后创建案件。'
                           : preview.errors.join('；')}
                       </p>
                     </div>
                   </div>
+                  <p className="text-[11px] leading-5 text-slate-500">
+                    以下信息只用于确认客户和报表口径，不会改写原 Excel。
+                  </p>
                   <dl className="grid gap-px overflow-hidden rounded-xl bg-slate-200 ring-1 ring-slate-200 sm:grid-cols-2">
                     {[
                       ['客户', preview.case.CustomerName || '—'],
-                      ['BP', preview.case.BP || '—'],
-                      ['信用段', preview.case.CreditSegment || '—'],
-                      ['报表币种', preview.case.StatementCurrency || '—'],
-                      ['SAP 历史期间', `${preview.sap_periods.length} 期`],
-                      ['汇率记录', `${preview.fx_count} 条`],
+                      ['客户编号（BP）', preview.case.BP || '—'],
+                      ['本期报表截止日', preview.years[0]?.period_end || '—'],
+                      ['财务报表币种', preview.case.StatementCurrency || '—'],
                     ].map(([label, value]) => (
                       <div key={label} className="bg-white px-4 py-3">
                         <dt className="text-[11px] text-slate-500">{label}</dt>
@@ -211,7 +228,7 @@ export function NewCaseForm() {
                       </p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         {[
-                          ['update', '更新当前案件'],
+                          ['update', '替换当前草稿并重新核验'],
                           ['cycle', '开始新评审周期'],
                         ].map(([value, label]) => (
                           <button
@@ -223,7 +240,29 @@ export function NewCaseForm() {
                           </button>
                         ))}
                       </div>
+                      {duplicateMode === 'update' && (
+                        <p className="mt-3 text-xs leading-5 text-amber-900">
+                          将保留历史记录，但清除本轮主体确认及后续签署、评分和交付结果；已完成案件不能覆盖。
+                        </p>
+                      )}
                     </div>
+                  )}
+                  {preview.valid && (
+                    <Button
+                      onClick={() => void create()}
+                      disabled={
+                        busy ||
+                        (!!preview.duplicate && duplicateMode === 'review')
+                      }
+                      className="h-11 w-full rounded-xl bg-blue-700 hover:bg-blue-800"
+                    >
+                      {busy ? (
+                        <IconLoader2 className="animate-spin" />
+                      ) : (
+                        <IconCheck />
+                      )}{' '}
+                      {busy ? '正在创建案件…' : '确认信息并创建案件'}
+                    </Button>
                   )}
                 </div>
               ) : null}
@@ -240,54 +279,6 @@ export function NewCaseForm() {
             </div>
           )}
         </section>
-
-        <aside className="h-fit min-w-0 rounded-2xl bg-white p-5 shadow-[0_8px_28px_-22px_rgba(15,23,42,.35)] ring-1 ring-slate-200 md:p-6">
-          <h2 className="text-sm font-semibold">建案说明</h2>
-          <p className="mt-2 text-xs leading-5 text-slate-500">
-            案件负责人会自动记录为当前登录账号，用于签署留痕与独立复核；无需手工填写姓名。
-          </p>
-          <div className="mt-5 rounded-xl bg-slate-50 p-4">
-            <p className="text-xs font-semibold text-slate-800">
-              建案后会发生什么？
-            </p>
-            <ol className="mt-3 space-y-3 text-xs leading-5 text-slate-600">
-              <li className="flex gap-2">
-                <span className="font-semibold text-blue-700 tabular-nums">
-                  1.
-                </span>{' '}
-                系统整理企业主体候选
-              </li>
-              <li className="flex gap-2">
-                <span className="font-semibold text-blue-700 tabular-nums">
-                  2.
-                </span>{' '}
-                你确认后才进入财务证据
-              </li>
-              <li className="flex gap-2">
-                <span className="font-semibold text-blue-700 tabular-nums">
-                  3.
-                </span>{' '}
-                所有输入与操作全程留痕
-              </li>
-            </ol>
-          </div>
-          <Button
-            onClick={() => void create()}
-            disabled={
-              busy ||
-              !preview?.valid ||
-              (!!preview.duplicate && duplicateMode === 'review')
-            }
-            className="mt-6 h-11 w-full rounded-xl bg-blue-700 hover:bg-blue-800"
-          >
-            {busy ? (
-              <IconLoader2 className="animate-spin" />
-            ) : (
-              <IconFileSpreadsheet />
-            )}{' '}
-            创建案件
-          </Button>
-        </aside>
       </div>
     </div>
   );

@@ -77,8 +77,13 @@ def run_macro(v: Dict[str, float], qual: Dict[str, Optional[str]], rating: Optio
     ocf_tl = _div(v.get("operating_cash_flow"), v.get("total_liabilities"))
     liq = (add("LIQ 41%", "利息保障倍数", ic, _band(ic, [8, 5, 3, 2, 1])) +
            add("LIQ 41%", "经营现金流 / 总负债 (%)", ocf_tl and ocf_tl * 100, _band(ocf_tl and ocf_tl * 100, [20, 15, 10, 5, 0.01]))) / 2
-    de = _div(v.get("total_liabilities"), v.get("total_equity"))
-    lvg = add("LVG 19%", "总负债 / 权益", de, _band(de, [0.8, 1.2, 1.6, 2.2, 3.0], higher_is_better=False))
+    equity_value = v.get("total_equity")
+    de = _div(v.get("total_liabilities"), equity_value)
+    if equity_value is not None and equity_value <= 0:
+        lvg = add("LVG 19%", "总负债 / 权益", de, 6)
+        notes.append("所有者权益小于或等于零，杠杆项按最高风险 6 分计")
+    else:
+        lvg = add("LVG 19%", "总负债 / 权益", de, _band(de, [0.8, 1.2, 1.6, 2.2, 3.0], higher_is_better=False))
     om = _div(v.get("operating_income"), v.get("net_sales"))
     roa = _div(v.get("net_income"), v.get("total_assets"))
     prof = (add("PROF 37%", "营业利润率 (%)", om and om * 100, _band(om and om * 100, [12, 8, 5, 3, 0.01])) +

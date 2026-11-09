@@ -107,18 +107,6 @@ function SidebarContent({
           </div>
         ))}
       </nav>
-      <div className="border-t border-slate-200 p-4">
-        <div className="rounded-xl bg-slate-100 p-3">
-          <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-slate-800">
-            <IconBook2 size={16} /> 资料访问
-          </div>
-          <p className="text-xs leading-5 text-slate-600">
-            {permissions.maintenanceOnly
-              ? '可查看全部案件并维护知识资料；不能创建、分析、编辑或签署案件。'
-              : '知识资料按当前账号权限显示；管理操作仅对管理员开放。'}
-          </p>
-        </div>
-      </div>
     </>
   );
 }

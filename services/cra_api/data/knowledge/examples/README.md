@@ -7,11 +7,13 @@
 | `demo_credit_policy_v1.md`、`demo_credit_policy_v2.md` | 完全模拟的历史/现行演练版本；V2 变更为假设 | `policy` | 按评审日只取一个有效版本；测试库中明确替代未版本化 mock 政策 |
 | `demo_case_003_evidence.md` | 根据仓库模拟 CASE-003/OCR 抽取整理，仍为模拟案件 | `case_evidence` | 绑定 `CASE-003`，仅本案授权人员可见；不覆盖原 PDF/Excel |
 | `demo_case_003_history.md` | 根据仓库模拟历史 CSV 整理，非真实审批 | `case_history` | 仅同 BP 趋势查询；禁止视为现行规则 |
+| `credit_review_process_reference.md` | 基于 SAP 官方流程和贸易授信业务要点整理的流程参考 | `public_reference` | 用于解释受理、分析、审批和 SAP/SCASE 交接；不提供公司阈值或审批权 |
 | `oecd_2026-10-16_reference.md` | 真实公开 OECD 原表的有限转述；无内部评分映射 | `public_reference` | 核对官网当前版本、来源页及许可后发布 |
+| `dnb_rating_public_reference.md` | D&B Rating/PAYDEX 的公开释义摘要 | `public_reference` | 只解释指标和 SAP AR 的边界；客户分值须来自获授权报告 |
 | `rag_eval_cases.jsonl` | 设计用例和金标草案，未运行 | 不入库 | 按 `docs/10-rag-knowledge-design.md` 执行三层评测 |
 
-每个 Markdown 样例开头的 `样例元数据` 是人可读的设计约定；当前上传 API 不会将这些字段解析为系统强制过滤。未经发布门禁和服务端权限/日期过滤，不能把样例当现行权威规则。
+每个 Markdown 样例开头的 `样例元数据` 是人可读的设计约定；机器可执行字段以 `ingest_manifest.json` 为准。未经发布门禁和服务端权限/日期过滤，不能把样例当现行权威规则。默认候选发布只包含 8 份核心业务资料；30 张拟议规则/证据卡留在 staging，普通演示不加载。
 
-评测使用步骤：在隔离测试库导入对应样例并记录实际 `document_id/chunk_id`；把 JSONL 的 `gold_sections` 映射到实际 chunk ID；给每题设置用户、案件和评审日期；先检查资料齐全与授权候选，再检查答案和引用。不要只用 `gold_source` 文件名算通过。
+评测使用步骤：在隔离测试库导入对应样例并记录实际 `document_id/chunk_id`；把 JSONL 的 `gold_sections` 映射到实际 chunk ID；给每题设置用户、案件和评审日期；先检查资料齐全与授权候选，再检查答案和引用。不要只用 `gold_source` 文件名算通过。当前 JSONL 已运行离线 BM25 诊断，但生成、真实权限和线上模型仍未评测。
 
 方案全文见 [CRA 知识设计](../../../../../docs/10-rag-knowledge-design.md)。

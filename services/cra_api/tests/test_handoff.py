@@ -1,7 +1,8 @@
-"""AI 交接包：Excel 宏导出的文件是 AI 拿到 SAP 数据的唯一途径。"""
+"""CRA Excel 交接包的导入、校验与往返。"""
 import shutil
 
 import pytest
+from openpyxl import load_workbook
 
 from cra import casefile
 from cra.handoff import SWITCH_MANUAL, SWITCH_YES, case_sap, import_package, read_package, write_package
@@ -26,6 +27,13 @@ def test_round_trip(tmp_path):
     assert pkg.sap["2024-12-31"]["net_sales"] == 1e7 and pkg.ar["PayHabits"] == "Prompt"
 
 
+def test_managed_upload_without_file_extension_is_readable(tmp_path):
+    source = write_package(tmp_path / "source.xlsx", CASE, YEARS, SAP, {}, {})
+    stored_object = tmp_path / "opaque-object-key"
+    shutil.copy2(source, stored_object)
+    assert read_package(stored_object).errors == []
+
+
 def test_import_creates_case_and_sap_only_comes_from_package(tmp_path, data_dir):
     p = write_package(tmp_path / "p.xlsx", CASE, YEARS, SAP, {}, {"PayHabits": "Prompt"})
     case, created, errors = import_package(p)
@@ -37,9 +45,12 @@ def test_import_creates_case_and_sap_only_comes_from_package(tmp_path, data_dir)
 
 
 def test_bad_package_is_rejected(tmp_path, data_dir):
-    years = [("2024-12-31", SWITCH_YES)]  # 没有要补的年份
-    _, _, errors = import_package(write_package(tmp_path / "bad.xlsx", CASE, years, {}, {}, {}))
-    assert any("No - Enter Manually" in e for e in errors) and any("这一列没有数字" in e for e in errors)
+    path = write_package(tmp_path / "bad.xlsx", CASE, YEARS, SAP, {}, {})
+    workbook = load_workbook(path)
+    workbook["Financial Statements"]["C3"] = None
+    workbook.save(path)
+    _, _, errors = import_package(path)
+    assert any("BP（C3）是空的" in error for error in errors)
 
 
 def test_same_file_round_trip_after_ai_fill(tmp_path, data_dir):

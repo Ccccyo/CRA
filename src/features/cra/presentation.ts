@@ -6,9 +6,9 @@ export const stageLabels: Record<string, string> = {
   financial_evidence: '抽取财务证据',
   financial_signoff: '签署财务证据',
   retrieve_context: '准备评审依据',
-  risk_signoff: '风险意见',
+  risk_signoff: '风险建议与条件',
   write_workbook: '生成 Excel 版本',
-  external_score: '外部评分',
+  external_score: '规则评分与额度建议',
   final_signoff: '最终复核',
   completed: '已完成',
 };

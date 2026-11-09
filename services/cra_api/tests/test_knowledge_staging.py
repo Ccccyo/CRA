@@ -26,9 +26,9 @@ def test_staging_seed_is_isolated_versioned_and_idempotent(tmp_path):
     database = tmp_path / "knowledge-staging.db"
     first = _build(database)
     second = _build(database)
-    assert first["changed_documents"] == 11
-    assert first["documents"] == 11
-    assert first["chunks"] == 51
+    assert first["changed_documents"] == 12
+    assert first["documents"] == 12
+    assert first["chunks"] == 68
     assert second["changed_documents"] == 0
     assert second["published_documents"] == 0
 
@@ -64,14 +64,19 @@ def test_staging_seed_is_isolated_versioned_and_idempotent(tmp_path):
         "dnb_rating_public_reference.md",
         "nacm_trade_credit_public_reference.md",
         "cra_mock_field_schema_reference.md",
+        "credit_review_process_reference.md",
     }.issubset({Path(citation).name for citation, _ in rows})
     assert all(
-        json.loads(metadata)["source_url"].startswith("https://")
+        (
+            json.loads(metadata).get("source_url", "").startswith("https://")
+            or all(url.startswith("https://") for url in json.loads(metadata).get("source_urls", []))
+        )
         for citation, metadata in rows
         if Path(citation).name in {
             "gleif_identity_public_reference.md",
             "dnb_rating_public_reference.md",
             "nacm_trade_credit_public_reference.md",
+            "credit_review_process_reference.md",
         }
     )
     assert "idx_kb_stage_doc_status" in indexes
@@ -96,8 +101,8 @@ def test_remote_sync_defaults_to_no_connection_and_rejects_wrong_target():
     )
     result = json.loads(preview.stdout)
     assert result["mode"] == "dry_run_no_database_connection"
-    assert result["documents"] == 11
-    assert result["chunks"] == 51
+    assert result["documents"] == 12
+    assert result["chunks"] == 68
     assert result["published_documents"] == 0
     assert "cra_knowledge_document" not in result["target_tables"]
 

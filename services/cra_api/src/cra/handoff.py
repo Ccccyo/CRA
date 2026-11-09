@@ -1,14 +1,9 @@
-"""AI 交接包 = CRA Excel 文件本身：导入和导出是同一个格式，只是多填了内容。
-
-动线：Excel 填 BP → VBA 从 SAP 拉往年财报、汇率、付款记录（填进模板）→ 把这份 CRA 文件上传到助手
-     → 助手里认公司（Lookup + Merge）、读新财报、写意见 → 在**同一份文件**的黄色格子里填好 → 下载
-     → Excel 里 Import AI（或直接用这份文件）→ Run Macro → SAP
+"""CRA Excel 交接包：上传建案、核对本期材料，并把评审结果写回同一格式。
 
 助手从这几处读（格式见 excel_mock.py）：
-- Financial Statements：BP（C3）、信用段（C4）、三年开关（C2:E2）、期末（C5:E5）、币种（C6）、往年财报（D、E 列）
+- Financial Statements：BP（C3）、信用段（C4）、期末（C5:E5）、币种（C6）、往年财报（D、E 列）
 - Executive Summary：申请额度（B5）
 - Header params：客户地址、分析师填写项、SAP 应收的付款记录、导出信息
-- TCURR：汇率
 """
 import json
 import shutil
@@ -85,7 +80,11 @@ def _text(v) -> str:
 def _read_cached(path: str, mtime: float) -> Package:
     from openpyxl import load_workbook
 
-    wb = load_workbook(path, data_only=True)
+    # Managed uploads are stored under an opaque object key without the original
+    # extension. Passing a binary stream lets openpyxl inspect the XLSX archive
+    # instead of rejecting the extensionless storage path.
+    with open(path, "rb") as workbook_stream:
+        wb = load_workbook(workbook_stream, data_only=True)
     missing = [s for s in (FS_SHEET, ES_SHEET, HEADER_SHEET) if s not in wb.sheetnames]
     if missing:
         return Package({}, {}, [], {}, {}, {}, [f"缺少工作表：{'、'.join(missing)}（请上传 CRA 模板格式的文件）"])
@@ -98,10 +97,12 @@ def _read_cached(path: str, mtime: float) -> Package:
             **{k: hp.get(k, "") for k in ("Country", "State", "City", "Business", "CompanyTypeHint",
                                          "CustomerDistinction", "SovereignHint")}}
     years, sap = [], {}
-    for col in YEAR_COLS:
-        end, sw = _text(fs[f"{col}5"].value)[:10], _text(fs[f"{col}2"].value)
+    for index, col in enumerate(YEAR_COLS):
+        end = _text(fs[f"{col}5"].value)[:10]
         if not end:
             continue
+        raw_switch = _text(fs[f"{col}2"].value)
+        sw = raw_switch if raw_switch in SWITCHES else (SWITCH_MANUAL if index == 0 else SWITCH_YES)
         years.append((end, sw))
         if sw == SWITCH_YES:
             vals = {code: float(fs[f"{col}{row}"].value) for code, row in FIELD_ROW.items()
@@ -116,23 +117,21 @@ def _read_cached(path: str, mtime: float) -> Package:
 
     errors = []
     if not years:
-        return Package(meta, case, years, sap, fx, ar, ["这是空白模板：期末日期（C5:E5）、BP 都还没填。"
-                                                       "请先在 Excel 里填好，并运行宏把 SAP 数据拉进来"])
+        return Package(meta, case, years, sap, fx, ar, ["模板缺少期末日期。请先填写 C5:E5 的报表期间。"])
     if not case["BP"]:
         errors.append("Financial Statements 的 BP（C3）是空的")
     if not case["StatementCurrency"]:
         errors.append("Financial Statements 的报表币种（C6）是空的")
-    bad = [sw for _, sw in years if sw not in SWITCHES]
+    bad = [_text(fs[f"{col}2"].value) for col in YEAR_COLS
+           if _text(fs[f"{col}2"].value) and _text(fs[f"{col}2"].value) not in SWITCHES]
     if bad:
         errors.append(f"三年开关（C2:E2）有无效值：{bad}")
     manual = [y for y, sw in years if sw == SWITCH_MANUAL]
     if not manual:
-        errors.append("没有标为「No - Enter Manually」的年份：没有需要 AI 补的财报")
-    elif _text(fs["C2"].value) != SWITCH_MANUAL:
-        errors.append("要 AI 补的年份必须在本年度列（C 列）：请把 C2 设为「No - Enter Manually」")
+        errors.append("本期报表期间为空，请填写 Financial Statements 的 C5")
     for y, sw in years:
         if sw == SWITCH_YES and y not in sap:
-            errors.append(f"{y} 标为从 SAP 导出，但这一列没有数字：先在 Excel 里运行宏把 SAP 数据拉进来")
+            errors.append(f"{y} 已登记为历史期间，但该列没有财务数据")
     return Package(meta, case, years, sap, fx, ar, errors)
 
 

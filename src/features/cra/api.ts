@@ -312,7 +312,7 @@ export const craApi = {
       answer: string;
       sources:
         | Record<string, string>
-        | Array<{ id?: string; citation?: string; text?: string }>;
+        | Array<{ id?: string; citation?: string; text?: string; url?: string }>;
       citation?: Record<string, unknown>;
       validation_attempts?: number;
       requires_human_review?: boolean;

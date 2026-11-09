@@ -30,8 +30,8 @@ const CASE_STAGES = [
   'financial_signoff',
   'retrieve_context',
   'risk_signoff',
-  'write_workbook',
   'external_score',
+  'write_workbook',
   'final_signoff',
 ] as const;
 
@@ -49,6 +49,8 @@ type CaseSummaryRow = {
   completed_tasks: number;
   total_tasks: number;
   workflow_updated_at: Date | string;
+  mock: boolean;
+  access: Record<string, unknown> | null;
 };
 
 type CaseDetailRow = {
@@ -61,40 +63,66 @@ type CaseDetailRow = {
   stage_snapshots: Array<Record<string, unknown>>;
 };
 
-async function readCaseSummaries() {
+const REVIEW_ROLES = new Set([
+  'senior_credit_analyst',
+  'credit_manager',
+  'quality_manager',
+]);
+
+function canReadCase(
+  mock: boolean,
+  access: Record<string, unknown> | null | undefined,
+  userId: string,
+  role: string
+) {
+  if (role === 'admin' || role === 'super_admin' || mock) return true;
+  const owner = String(access?.owner_user_id || '');
+  const participants = Array.isArray(access?.participants)
+    ? access.participants.map(String)
+    : [];
+  return (
+    owner === userId || participants.includes(userId) || REVIEW_ROLES.has(role)
+  );
+}
+
+async function readCaseSummaries(userId: string, role: string) {
   const result = await db().execute(sql`
     SELECT
       c.case_id, c.title, c.bp, c.requested_cl_usd, c.customer,
+      c.mock, COALESCE(n.payload->'case_access', '{}'::jsonb) AS access,
       w.status, w.current_stage, w.stage_index, w.current_task,
       w.blocker, w.completed_tasks, w.total_tasks,
       w.updated_at AS workflow_updated_at
     FROM cra_case c
     JOIN cra_workflow_state w ON w.case_id = c.case_id
+    LEFT JOIN cra_case_note n ON n.case_id = c.case_id
     ORDER BY c.case_id
   `);
   const rows = (
     Array.isArray(result) ? result : result.rows || []
   ) as CaseSummaryRow[];
-  return rows.map((row) => ({
-    case_id: row.case_id,
-    title: row.title,
-    bp: row.bp,
-    requested_cl_usd: Number(row.requested_cl_usd || 0),
-    customer: row.customer || {},
-    workflow: {
+  return rows
+    .filter((row) => canReadCase(row.mock, row.access, userId, role))
+    .map((row) => ({
       case_id: row.case_id,
-      status: row.status,
-      current_stage: row.current_stage,
-      stage_index: row.stage_index,
-      current_task: row.current_task,
-      blocker: row.blocker,
-      completed_tasks: row.completed_tasks,
-      total_tasks: row.total_tasks,
-      updated_at: row.workflow_updated_at,
-      total_stages: CASE_STAGES.length,
-      stages: CASE_STAGES,
-    },
-  }));
+      title: row.title,
+      bp: row.bp,
+      requested_cl_usd: Number(row.requested_cl_usd || 0),
+      customer: row.customer || {},
+      workflow: {
+        case_id: row.case_id,
+        status: row.status,
+        current_stage: row.current_stage,
+        stage_index: row.stage_index,
+        current_task: row.current_task,
+        blocker: row.blocker,
+        completed_tasks: row.completed_tasks,
+        total_tasks: row.total_tasks,
+        updated_at: row.workflow_updated_at,
+        total_stages: CASE_STAGES.length,
+        stages: CASE_STAGES,
+      },
+    }));
 }
 
 async function readCaseDetail(caseId: string) {
@@ -181,122 +209,6 @@ async function readWorkflowStage(caseId: string) {
     current_stage: string;
   }>;
   return rows[0]?.current_stage || '';
-}
-
-async function resolveFinancialSignoff(
-  caseId: string,
-  requestedTaskId: number,
-  resolution: Record<string, unknown>,
-  actor: { id: string; name: string; role: string }
-) {
-  const database = db();
-  await database.transaction(async (tx: ReturnType<typeof db>) => {
-    const contextResult = await tx.execute(sql`
-      SELECT to_jsonb(w) AS workflow,
-             COALESCE(n.payload, '{}'::jsonb) AS notes
-      FROM cra_workflow_state w
-      LEFT JOIN cra_case_note n ON n.case_id = w.case_id
-      WHERE w.case_id = ${caseId}
-      FOR UPDATE OF w
-    `);
-    const contexts = (
-      Array.isArray(contextResult) ? contextResult : contextResult.rows || []
-    ) as Array<{
-      workflow: Record<string, unknown>;
-      notes: Record<string, unknown>;
-    }>;
-    const context = contexts[0];
-    if (!context) throw new Error('CASE_NOT_FOUND');
-
-    // A repeated click after success is safe and simply returns the new state.
-    if (context.workflow.current_stage !== 'financial_signoff') return;
-
-    const taskResult = await tx.execute(sql`
-      SELECT id, title
-      FROM cra_human_task
-      WHERE case_id = ${caseId}
-        AND task_type = 'financial_signoff'
-        AND status = 'open'
-      ORDER BY CASE WHEN id = ${requestedTaskId} THEN 0 ELSE 1 END, id DESC
-      LIMIT 1
-      FOR UPDATE
-    `);
-    const tasks = (
-      Array.isArray(taskResult) ? taskResult : taskResult.rows || []
-    ) as Array<{ id: number; title: string }>;
-    let task = tasks[0];
-    if (!task) {
-      const inserted = await tx.execute(sql`
-        INSERT INTO cra_human_task
-          (case_id, task_type, title, description, status, payload, resolved_at)
-        VALUES (
-          ${caseId}, 'financial_signoff', '签署财务证据',
-          '由签署动作补全的审计记录', 'resolved', '{}'::jsonb, NOW()
-        )
-        RETURNING id, title
-      `);
-      task = (Array.isArray(inserted) ? inserted[0] : inserted.rows?.[0]) as {
-        id: number;
-        title: string;
-      };
-    } else {
-      await tx.execute(sql`
-        UPDATE cra_human_task
-        SET status = 'resolved', resolved_at = NOW()
-        WHERE id = ${task.id}
-      `);
-    }
-
-    const notes = { ...context.notes };
-    const resolutions = {
-      ...((notes.human_resolutions as Record<string, unknown>) || {}),
-      financial_signoff: {
-        ...resolution,
-        resolved_by: actor.id,
-        resolved_by_name: actor.name,
-        resolved_by_role: actor.role,
-        resolved_at: new Date().toISOString(),
-      },
-    };
-    notes.human_resolutions = resolutions;
-    const notesJson = JSON.stringify(notes);
-    const snapshotJson = JSON.stringify({
-      workflow: context.workflow,
-      notes,
-    });
-    await tx.execute(sql`
-      INSERT INTO cra_stage_snapshot
-        (case_id, stage, stage_index, title, payload)
-      VALUES (
-        ${caseId}, 'financial_signoff',
-        ${Number(context.workflow.stage_index || 3)},
-        ${String(context.workflow.current_task || '等待财务证据签署')},
-        ${snapshotJson}::jsonb
-      )
-    `);
-    await tx.execute(sql`
-      INSERT INTO cra_case_note (case_id, payload)
-      VALUES (${caseId}, ${notesJson}::jsonb)
-      ON CONFLICT(case_id) DO UPDATE SET
-        payload = EXCLUDED.payload, updated_at = NOW()
-    `);
-    await tx.execute(sql`
-      UPDATE cra_workflow_state
-      SET status = 'running', current_stage = 'retrieve_context',
-          stage_index = 4, current_task = '检索当前规则、行业与历史案件',
-          blocker = '', updated_at = NOW()
-      WHERE case_id = ${caseId}
-    `);
-    await tx.execute(sql`
-      INSERT INTO cra_agent_event
-        (case_id, event_type, title, detail, sources)
-      VALUES (
-        ${caseId}, 'human_resolved', ${`${task.title} 已完成`},
-        '人工责任已记录，Agent 可继续下一步。', '[]'::jsonb
-      )
-    `);
-  });
-  return readCaseDetail(caseId);
 }
 
 async function readFinancialReport(caseId: string) {
@@ -487,7 +399,7 @@ async function forward(request: NextRequest, context: RouteContext) {
   // instead of making a second network hop through FastAPI.
   if (request.method === 'GET' && path.length === 1 && path[0] === 'cases') {
     try {
-      return Response.json(await readCaseSummaries());
+      return Response.json(await readCaseSummaries(user.id, forwardedRole));
     } catch {
       return Response.json(
         { detail: '案件数据库读取失败，请稍后重试' },
@@ -499,6 +411,23 @@ async function forward(request: NextRequest, context: RouteContext) {
   if (request.method === 'GET' && path.length === 2 && path[0] === 'cases') {
     try {
       const caseDetail = await readCaseDetail(path[1]);
+      const allowed =
+        caseDetail &&
+        canReadCase(
+          Boolean((caseDetail as Record<string, unknown>).mock),
+          (caseDetail.notes.case_access || null) as Record<
+            string,
+            unknown
+          > | null,
+          user.id,
+          forwardedRole
+        );
+      if (caseDetail && !allowed) {
+        return Response.json(
+          { detail: '当前用户不在该案件的授权范围内' },
+          { status: 403 }
+        );
+      }
       return caseDetail
         ? Response.json({
             ...caseDetail,
@@ -521,6 +450,28 @@ async function forward(request: NextRequest, context: RouteContext) {
     path[3] === 'source'
   ) {
     try {
+      const caseDetail = await readCaseDetail(path[1]);
+      if (
+        !caseDetail ||
+        !canReadCase(
+          Boolean((caseDetail as Record<string, unknown>).mock),
+          (caseDetail.notes.case_access || null) as Record<
+            string,
+            unknown
+          > | null,
+          user.id,
+          forwardedRole
+        )
+      ) {
+        return Response.json(
+          {
+            detail: caseDetail
+              ? '当前用户不在该案件的授权范围内'
+              : '案件不存在',
+          },
+          { status: caseDetail ? 403 : 404 }
+        );
+      }
       const managed = await currentBoundFile(
         'case',
         path[1],
@@ -546,6 +497,26 @@ async function forward(request: NextRequest, context: RouteContext) {
     path[0] === 'cases' &&
     path[2] === 'source'
   ) {
+    const caseDetail = await readCaseDetail(path[1]);
+    if (
+      !caseDetail ||
+      !canReadCase(
+        Boolean((caseDetail as Record<string, unknown>).mock),
+        (caseDetail.notes.case_access || null) as Record<
+          string,
+          unknown
+        > | null,
+        user.id,
+        forwardedRole
+      )
+    ) {
+      return Response.json(
+        {
+          detail: caseDetail ? '当前用户不在该案件的授权范围内' : '案件不存在',
+        },
+        { status: caseDetail ? 403 : 404 }
+      );
+    }
     const redirect = await managedSourceRedirect(
       await currentBoundFile('case', path[1], 'case_excel')
     );
@@ -564,70 +535,6 @@ async function forward(request: NextRequest, context: RouteContext) {
       'inline'
     );
     if (redirect) return redirect;
-  }
-
-  if (
-    request.method === 'POST' &&
-    path.length === 5 &&
-    path[0] === 'cases' &&
-    path[2] === 'tasks' &&
-    path[4] === 'resolve' &&
-    (await readWorkflowStage(path[1])) === 'financial_signoff'
-  ) {
-    try {
-      const body = (await request.json().catch(() => ({}))) as {
-        resolution?: Record<string, unknown>;
-      };
-      const result = await resolveFinancialSignoff(
-        path[1],
-        Number(path[3]),
-        body.resolution || {},
-        {
-          id: user.id,
-          name: user.name || user.email,
-          role: forwardedRole,
-        }
-      );
-      if (result) {
-        // This signoff writes PostgreSQL directly; refresh the private case
-        // projection after commit. A failed refresh must not replay a signoff.
-        const baseUrl =
-          process.env.CRA_API_INTERNAL_URL || 'http://127.0.0.1:8001';
-        try {
-          const refreshed = await fetch(
-            `${baseUrl.replace(/\/$/, '')}/cases/${encodeURIComponent(path[1])}/evidence/reindex`,
-            {
-              method: 'POST',
-              headers: {
-                'X-CRA-Service-Secret': sharedSecret,
-                'X-CRA-User': user.id,
-                'X-CRA-Name': encodeURIComponent(user.name || user.email),
-                'X-CRA-Role': forwardedRole,
-              },
-              cache: 'no-store',
-              signal: AbortSignal.timeout(5_000),
-            }
-          );
-          return Response.json({
-            ...result,
-            rag_index_status: refreshed.ok
-              ? 'current'
-              : 'retry_on_next_case_query',
-          });
-        } catch {
-          return Response.json({
-            ...result,
-            rag_index_status: 'retry_on_next_case_query',
-          });
-        }
-      }
-      return Response.json({ detail: '案件不存在' }, { status: 404 });
-    } catch {
-      return Response.json(
-        { detail: '财务证据签署失败，请刷新后重试' },
-        { status: 500 }
-      );
-    }
   }
 
   const baseUrl = process.env.CRA_API_INTERNAL_URL || 'http://127.0.0.1:8001';

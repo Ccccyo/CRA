@@ -29,11 +29,27 @@ def test_planner_narrows_sources_and_keeps_approval_out_of_tools():
     assert external.steps[0] == "gleif_exact_lei"
 
 
-def test_risk_method_routes_to_proposals_not_approved_policy():
+def test_visible_chat_examples_use_bounded_structured_plans():
+    examples = {
+        "为什么停在这里？": "case_status_explanation",
+        "我需要确认什么？": "case_next_action",
+        "使用了哪些评审资料？": "case_evidence_inventory",
+    }
+    for question, intent in examples.items():
+        plan = plan_case_question(question, _frame())
+        assert plan.intent == intent
+        assert not plan.libraries
+
+
+def test_credit_review_process_routes_to_curated_policy_and_public_reference():
     method = plan_case_question("风险评估流程需要哪些资料，怎么核验？", _frame())
-    assert method.intent == "risk_method_explanation"
-    assert method.libraries == {"proposed_rule", "evidence_spec"}
-    assert "policy" not in method.libraries
+    assert method.intent == "credit_review_process"
+    assert method.libraries == {"policy", "public_reference"}
+    assert "proposed_rule" not in method.libraries
+
+    proposal = plan_case_question("查看未获签核的拟议风控方法", _frame())
+    assert proposal.intent == "risk_method_explanation"
+    assert proposal.libraries == {"proposed_rule", "evidence_spec"}
 
     approval = plan_case_question("审批权限和授信制度怎么规定？", _frame())
     assert approval.intent == "policy_explanation"

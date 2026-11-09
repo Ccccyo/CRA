@@ -1,4 +1,4 @@
-"""Mock CRA Excel：生成 → 助手内读取 → 修改保存 → 模拟 Run Macro 回填，全程往返。"""
+"""CRA Excel：生成、读取、人工修改与结果回填。"""
 import json
 
 import pytest
@@ -29,10 +29,24 @@ def _write(tmp_path, case_id):
 
 def test_layout_is_simple_and_keeps_vba_names():
     wb = build_mock_workbook()
-    assert [ws.title for ws in wb.worksheets if ws.sheet_state == "visible"] == [FS_SHEET, "Executive Summary", "Header params", "TCURR"]
+    assert [ws.title for ws in wb.worksheets if ws.sheet_state == "visible"] == [FS_SHEET, "Executive Summary"]
+    assert "TCURR" not in wb.sheetnames
+    assert "Lists" not in wb.sheetnames
+    assert wb[FS_SHEET]["A2"].value is None
+    assert wb[FS_SHEET]["B10"].value is None
+    assert wb[FS_SHEET].column_dimensions["B"].hidden
     for name in ["BP", "CreditSegment", "ENDDATE", "ENDDATE2", "StmtCurrency", "PayHabits", "CompanyType",
                  "SovereignRating", "CustomerDistinction", "CorporateCreditRiskRating", "Score"]:
         assert name in wb.defined_names, name
+
+
+def test_dropdowns_are_inline_and_do_not_depend_on_helper_sheet():
+    wb = build_mock_workbook()
+    validations = wb["Executive Summary"].data_validations.dataValidation
+    assert len(validations) == 5
+    assert all("Lists!" not in (validation.formula1 or "") for validation in validations)
+    assert any("Prompt" in validation.formula1 for validation in validations)
+    assert any("Tangible Net Worth" in validation.formula1 for validation in validations)
 
 
 def test_ai_current_year_and_sap_prior_years(tmp_path):
@@ -67,3 +81,28 @@ def test_macro_approval_escalates_when_request_exceeds_suggestion():
     small = run_macro(v, {k: q["final"] for k, q in QUAL.items()}, "3A2", "A. % Tangible Net Worth", 1_000)
     big = run_macro(v, {k: q["final"] for k, q in QUAL.items()}, "3A2", "A. % Tangible Net Worth", 50_000_000)
     assert "提高一级" not in small.approval and "提高一级" in big.approval
+
+
+def test_non_positive_equity_is_never_scored_as_low_leverage():
+    v = {
+        "operating_income": 10,
+        "interest_expense": 1,
+        "operating_cash_flow": 20,
+        "total_liabilities": 100,
+        "total_equity": -10,
+        "net_sales": 100,
+        "net_income": 8,
+        "total_assets": 90,
+        "intangible_assets": 0,
+        "goodwill": 0,
+    }
+    result = run_macro(
+        v,
+        {k: q["final"] for k, q in QUAL.items()},
+        "3A2",
+        "A. % Tangible Net Worth",
+        1_000,
+    )
+    leverage = next(row for row in result.breakdown if row["指标"] == "总负债 / 权益")
+    assert leverage["得分"] == 6
+    assert any("所有者权益小于或等于零" in note for note in result.notes)

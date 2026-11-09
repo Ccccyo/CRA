@@ -27,6 +27,7 @@ from cra.retrieve.hybrid import build_retriever  # noqa: E402
 from cra.retrieve.runtime import ScopedRetriever  # noqa: E402
 
 DATASET = API / "data" / "knowledge" / "examples" / "rag_eval_cases.jsonl"
+REPORT_SCHEMA_VERSION = "cra-rag-eval-v2"
 
 
 def load_cases(path: Path = DATASET) -> list[dict]:
@@ -59,13 +60,37 @@ def evaluate(cases: list[dict] | None = None, k: int = 8) -> dict:
     if k < 1:
         raise ValueError("k must be positive")
     module = runpy.run_path(str(ROOT / "scripts" / "publish-demo-knowledge.py"))
-    # Preserve the original five-document benchmark denominator. The proposed
-    # method/evidence cards have their own release gate and are not gold sources
-    # for this legacy policy/case-history dataset.
+    # Evaluate every released gold-source library. Proposed method/evidence
+    # cards have their own release gate and are not gold sources for this
+    # policy/case/public-reference dataset.
     prepared = [
         item for item in module["prepare_release"]()
-        if item[0]["library_id"] in {"policy", "public_reference", "case_history"}
+        if item[0]["library_id"] in {
+            "policy", "public_reference", "case_history", "case_evidence",
+        }
     ]
+    # Case evidence is indexed per authorized case at runtime and intentionally
+    # omitted from the shared eight-document catalog. Keep the synthetic
+    # CASE-003 fixture in this end-to-end evaluation so case-scoped retrieval is
+    # still measured without publishing customer evidence as shared knowledge.
+    staged = runpy.run_path(str(ROOT / "scripts" / "build-knowledge-staging.py"))[
+        "prepare_documents"
+    ]()
+    for document, rows in staged:
+        if document["metadata"].get("source_reference") != "knowledge/examples/demo_case_003_evidence.md":
+            continue
+        runtime_meta = {
+            **document["metadata"],
+            "status": "active_case_evidence",
+            "is_published": True,
+        }
+        prepared.append((
+            {**document, "metadata": runtime_meta},
+            [
+                {**row, "metadata": {**row["metadata"], **runtime_meta}}
+                for row in rows
+            ],
+        ))
     chunks = []
     keys = {}
     digest = hashlib.sha256()
@@ -82,8 +107,13 @@ def evaluate(cases: list[dict] | None = None, k: int = 8) -> dict:
             digest.update(chunk.text.encode("utf-8"))
     shared = build_retriever(chunks, use_vector=False, use_rerank=False)
     corpus = set(keys.values())
+    evaluation_cases = cases if cases is not None else load_cases()
+    dataset_bytes = DATASET.read_bytes() if cases is None else (
+        "\n".join(json.dumps(case, ensure_ascii=False, sort_keys=True) for case in evaluation_cases)
+        + "\n"
+    ).encode("utf-8")
     details = []
-    for case in cases if cases is not None else load_cases():
+    for case in evaluation_cases:
         background = case["background"]
         base = {"id": case["id"], "split": case["split"], "question": case["question"]}
         if background.get("fixture"):
@@ -144,9 +174,31 @@ def evaluate(cases: list[dict] | None = None, k: int = 8) -> dict:
         for row in scored if row["first_failure"] != "retrieval_complete"
     ]
     return {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "scope": "published_mock_demo_offline_bm25_no_llm_no_live_rbac",
         "release_id": module["RELEASE_ID"], "corpus_sha256": digest.hexdigest(),
-        "dataset": str(DATASET.relative_to(ROOT)), "top_k": k,
+        "dataset": str(DATASET.relative_to(ROOT)),
+        "dataset_sha256": hashlib.sha256(dataset_bytes).hexdigest(),
+        "dataset_splits": Counter(row["split"] for row in details),
+        "configuration": {
+            "retriever": "bm25",
+            "candidate_k": 20,
+            "top_k": k,
+            "vector_enabled": False,
+            "rerank_enabled": False,
+            "model": "not_applicable_retrieval_only",
+            "prompt_version": "not_applicable_retrieval_only",
+            "knowledge_release_id": module["RELEASE_ID"],
+        },
+        "metric_definitions": {
+            "source_coverage": "gold sections present in published corpus / all gold sections",
+            "scope_coverage": "gold sections allowed by pre-retrieval scope / all gold sections",
+            "candidate_recall_at_20_over_available": "allowed gold sections found in 20 candidates / allowed gold sections",
+            "gold_recall_at_k_over_all": "gold sections found in top-k / all gold sections",
+            "gold_recall_at_k_over_available": "gold sections found in top-k / allowed gold sections",
+            "complete_evidence_case_rate": "scored cases with every gold section in top-k / all scored cases",
+        },
+        "top_k": k,
         "documents": len(prepared), "chunks": len(chunks),
         "inventory": {"total": len(details), "scored": len(scored),
                       "unscored": Counter(row["status"] for row in details if row["status"] != "scored")},

@@ -56,7 +56,7 @@ function ProductPreview() {
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-60" />
                   <span className="relative inline-flex size-2 rounded-full bg-blue-600" />
                 </span>
-                Agent 正在检索当前规则
+                正在准备评审依据
               </div>
               <span className="text-[10px] tabular-nums text-slate-500">3 / 4</span>
             </div>
@@ -116,7 +116,7 @@ export function CraLanding() {
               <span className="text-blue-700">每一步都有证据</span>
             </h1>
             <p className="mt-7 max-w-xl text-lg leading-8 text-slate-600">
-              从 CRA Excel 建案、主体核验、财务抽取到风险意见和回填，Agent 完成重复工作，分析师保留关键决策权。
+              从 CRA Excel 建案、主体核验、财务抽取到风险意见和回填，统一管理材料、依据与人工复核。
             </p>
             <div className="mt-9 flex flex-wrap items-center gap-3">
               <Link href="/workspace/cases/new" className="inline-flex h-12 items-center gap-2 rounded-xl bg-blue-700 px-5 text-sm font-semibold text-white shadow-[0_12px_30px_-16px_rgba(29,78,216,.8)] transition hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2">
@@ -125,11 +125,6 @@ export function CraLanding() {
               <a href="#workflow" className="inline-flex h-12 items-center gap-2 rounded-xl px-5 text-sm font-semibold text-slate-700 hover:bg-white">
                 <IconPlayerPlay size={18} /> 看完整路径
               </a>
-            </div>
-            <div className="mt-9 flex flex-wrap gap-x-6 gap-y-3 text-sm text-slate-600">
-              {['Excel 交接不变', '结论可追溯', '4 个人工卡点'].map((item) => (
-                <span key={item} className="flex items-center gap-2"><IconCheck size={17} className="text-emerald-600" /> {item}</span>
-              ))}
             </div>
           </div>
           <div className="relative z-10 lg:translate-x-5">
@@ -144,9 +139,6 @@ export function CraLanding() {
                 <h2 className="text-balance text-4xl leading-tight font-semibold tracking-[-0.035em] md:text-5xl">
                   一条真正可执行的评审链路
                 </h2>
-                <p className="mt-5 max-w-md text-base leading-7 text-slate-600">
-                  不用改变 SAP 和 CRA Excel 的交付方式。Agent 在中间负责读、查、校验、起草，每一次人工确认都留下责任记录。
-                </p>
               </div>
               <ol className="divide-y divide-slate-200 border-y border-slate-200">
                 {([
@@ -175,10 +167,10 @@ export function CraLanding() {
           <div className="mx-auto grid max-w-7xl gap-14 px-5 md:px-8 lg:grid-cols-2">
             <div>
               <h2 className="max-w-xl text-balance text-4xl leading-tight font-semibold tracking-[-0.035em] md:text-5xl">
-                Agent 会停下来，而不是替你做决定
+                关键判断始终由人确认
               </h2>
               <p className="mt-6 max-w-xl text-base leading-7 text-slate-300">
-                企业合并、财务证据签署、风险意见、最终额度是四个必经人工卡点。任何高风险异常都会阻断流程，不会被“自动化”掩盖。
+                企业主体、财务证据、风险意见和最终额度都必须经过人工复核。发现高风险异常时，流程会暂停并说明下一步。
               </p>
             </div>
             <div className="space-y-0 border-y border-slate-700">
@@ -201,9 +193,9 @@ export function CraLanding() {
           <div className="mx-auto max-w-5xl px-5 text-center md:px-8">
             <IconQuote size={28} className="mx-auto text-blue-700" />
             <blockquote className="mx-auto mt-6 max-w-4xl text-balance text-3xl leading-snug font-medium tracking-[-0.025em] text-slate-900 md:text-4xl">
-              不是让 AI 把评审写得更快，而是让分析师在每个结论上都更快地找到“为什么”。
+              评审不只要有结论，更要让分析师快速找到每项判断的依据。
             </blockquote>
-            <p className="mt-5 text-sm text-slate-500">CRA Agent 的产品原则</p>
+            <p className="mt-5 text-sm text-slate-500">CRA 工作台的产品原则</p>
             <Link href="/workspace" className="mt-10 inline-flex h-12 items-center gap-2 rounded-xl bg-slate-950 px-6 text-sm font-semibold text-white hover:bg-slate-800">
               打开演示工作台 <IconArrowRight size={18} />
             </Link>

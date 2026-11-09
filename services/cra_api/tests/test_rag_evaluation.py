@@ -23,11 +23,17 @@ def test_first_failure_attributes_the_earliest_stage():
 
 def test_demo_evaluation_keeps_untested_cases_and_makes_no_answer_claims():
     report = _module()["evaluate"]()
-    assert report["inventory"]["total"] == 13
-    assert report["inventory"]["scored"] == 9
+    assert report["report_schema_version"] == "cra-rag-eval-v2"
+    assert len(report["dataset_sha256"]) == 64
+    assert report["dataset_splits"] == {"dev": 7, "holdout": 9}
+    assert report["configuration"]["retriever"] == "bm25"
+    assert report["configuration"]["model"] == "not_applicable_retrieval_only"
+    assert "gold_recall_at_k_over_all" in report["metric_definitions"]
+    assert report["inventory"]["total"] == 16
+    assert report["inventory"]["scored"] == 12
     assert report["inventory"]["unscored"]["fixture_not_installed"] == 2
     assert report["inventory"]["unscored"]["no_answer_generation_required"] == 2
-    assert report["totals"]["gold"] == 22
+    assert report["totals"]["gold"] == 29
     assert report["totals"]["top_k_hit"] <= report["totals"]["candidate_hit"]
     assert report["totals"]["candidate_hit"] <= report["totals"]["allowed"]
     assert report["release_gate"]["answer_quality"] == "not_evaluated"

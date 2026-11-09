@@ -1,5 +1,7 @@
 # CRA 知识库数据搭建与结构化入库计划
 
+> 文档角色：隔离数据构建与发布准备记录。RAG 产品规则统一见 `PRODUCT.md` 第 6 节，知识治理与评测设计见 `docs/10-rag-knowledge-design.md`；本文件中的数量和日期只描述当次构建，不作为产品能力结论。
+
 > 2026-10-23；范围是卖方对企业客户的贸易赊销评审。本文描述首批开发/验证数据与后续正式资料要求，不声称取得真实公司政策或客户数据。RAG 回答不能替代结构化金额计算、服务端授权与人工审批。
 
 ## 1. 本轮实际落地与环境边界
@@ -8,7 +10,7 @@
 - 远端隔离导入表：2026-10-23 已将同一清单同步到配置的 Neon PostgreSQL 中新建的 `cra_knowledge_import_document`、`cra_knowledge_import_chunk`。在线服务只读取 `cra_knowledge_document`、`cra_knowledge_chunk`，所以新增资料尚不可被在线 RAG 检索。同步脚本为 `scripts/sync-knowledge-import-postgres.py`，默认只做无连接预检；实际写入须显式传 `--apply --expected-host <主机> --expected-database <库名>`。本轮远端读回为 11 文档、51 片段、0 发布；重复同步改动 0 文档；在线表仍为 10 文档、197 片段。
 - 来源登记：`services/cra_api/data/knowledge/examples/ingest_manifest.json`；构建：`services/cra_api/.venv/bin/python scripts/build-knowledge-staging.py`。原文、来源路径、SHA-256、版本、状态与片段均入库；相同原文及清单重复执行不重复写入。
 - 当前 11 文档、51 片段，全部 `is_published=false`。两版制度与评分是纯模拟；CASE-003 是模拟案件；会计字段对照是待复核的项目整理；OECD、GLEIF、D&B、NACM 文件是项目对公开来源的简要摘录，**不是官方原件或客户查询结果**。OECD 的 `current` URL 会变化，不可把链接当不可变快照。
-- 这里“所有数据”限定为 `ingest_manifest.json` 中已登记、已分级的 11 份**知识资料**；原始客户/案件文件、SAP 模拟 CSV、认证用户表、未核实的旧知识文件和二进制附件不因本次请求而批量导入知识表。它们各有结构化数据、授权和原件管理要求，不可混作 RAG 文本。现有运行时仅按 `library_id/case_id` 过滤，尚不会执行本库的状态、生效期、地域与 BP 标签；在服务端门禁实现前不得导入现有在线知识库或宣称权限安全。
+- 这里“所有数据”限定为 `ingest_manifest.json` 中已登记、已分级的 11 份**知识资料**；原始客户/案件文件、SAP 模拟 CSV、认证用户表、未核实的旧知识文件和二进制附件不因本次请求而批量导入知识表。它们各有结构化数据、授权和原件管理要求，不可混作 RAG 文本。当前在线检索已经具备案件、BP、适用期、区域等最小过滤，但隔离 staging 资料尚未完成正式发布审批、可信 tenant claim 与生产缓存隔离；在这些门禁验收前不得导入现有在线知识库或宣称完整权限安全。
 
 ## 2. 来源、获取方式与优先级
 

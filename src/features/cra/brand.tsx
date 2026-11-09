@@ -9,7 +9,7 @@ export function CraBrand({ compact = false }: { compact?: boolean }) {
       {!compact && (
         <span className="leading-tight">
           <strong className="block text-sm font-semibold tracking-[-0.02em] text-slate-950">
-            CRA Agent
+            CRA Workbench
           </strong>
           <span className="text-[11px] text-slate-500">企业信用评审工作台</span>
         </span>

@@ -25,18 +25,21 @@ from cra.config import get_settings  # noqa: E402
 from cra_api.store import WorkflowStore  # noqa: E402
 
 
-RELEASE_ID = "CRA-DEMO-2026-10-24"
+RELEASE_ID = "CRA-DEMO-2026-11-09-R3"
 MANAGED_BY = "publish-demo-knowledge.py"
 SOURCES = {
     "knowledge/examples/demo_credit_policy_v1.md",
     "knowledge/examples/demo_credit_policy_v2.md",
-    "knowledge/examples/demo_case_003_evidence.md",
+    "policy/cra_scoring_rules_mock.md",
     "knowledge/examples/demo_case_003_history.md",
+    "knowledge/examples/credit_review_process_reference.md",
+    "knowledge/examples/dnb_rating_public_reference.md",
     "knowledge/examples/gleif_identity_public_reference.md",
+    "knowledge/examples/oecd_2026-10-16_reference.md",
 }
 
 
-def prepare_release() -> list[tuple[dict, list[dict]]]:
+def prepare_release(*, include_proposals: bool = False) -> list[tuple[dict, list[dict]]]:
     prepared = runpy.run_path(
         str(PROJECT_ROOT / "scripts" / "build-knowledge-staging.py")
     )["prepare_documents"]()
@@ -47,24 +50,28 @@ def prepare_release() -> list[tuple[dict, list[dict]]]:
             continue
         if source["metadata"].get("is_published") is not False:
             raise ValueError("Source must be staged before a demo release")
-        if source["library_id"] not in {"policy", "case_evidence", "case_history", "public_reference"}:
+        if source["library_id"] not in {"policy", "case_history", "public_reference"}:
             raise ValueError("Unexpected demo library")
-        digest = hashlib.sha256(reference.encode("utf-8")).hexdigest()[:24]
+        digest = hashlib.sha256(f"{RELEASE_ID}:{reference}".encode("utf-8")).hexdigest()[:24]
         document_id = f"kb-demo-{digest}"
+        is_public_reference = source["library_id"] == "public_reference"
+        title_prefix = "【公开参考】" if is_public_reference else "【模拟演示】"
         label = (
             "历史申报/" if source["library_id"] == "case_history" else
-            "公开资料/" if source["library_id"] == "public_reference" else ""
-        ) + f"【模拟演示】{source['title']}"
+            "公开资料/" if is_public_reference else ""
+        ) + f"{title_prefix}{source['title']}"
         metadata = {
             **source["metadata"], "managed_by": MANAGED_BY,
             "status": "demo_published", "is_published": True,
             "demo_only": True, "demo_release_id": RELEASE_ID,
-            "publication_basis": "user-authorized mock demo; not business-policy signoff",
+            "publication_basis": (
+                "curated public-source summary for demo; not business-policy signoff"
+                if is_public_reference
+                else "user-authorized mock demo; not business-policy signoff"
+            ),
         }
-        if source["library_id"] == "case_evidence":
-            metadata["evidence_review_status"] = "unverified_mock_summary"
         document = {
-            **source, "id": document_id, "title": f"【模拟演示】{source['title']}",
+            **source, "id": document_id, "title": f"{title_prefix}{source['title']}",
             "citation": label, "metadata": metadata,
         }
         released_chunks = []
@@ -74,15 +81,19 @@ def prepare_release() -> list[tuple[dict, list[dict]]]:
             released_chunks.append({
                 **chunk, "id": f"{document_id}#{section_id}",
                 "document_id": document_id, "citation": citation,
-                "text": (
+                "text": ((
+                    "【公开资料摘要；不是公司政策或客户事实；须按来源时点和用途限制使用。】\n"
+                ) if is_public_reference else (
                     "【模拟演示资料；非真实制度或客户事实；原文中的 staging "
-                    "是编制时状态，当前仅在演示知识集发布。】\n" + chunk["text"]
-                ),
+                    "是编制时状态，当前仅在演示知识集发布。】\n"
+                )) + chunk["text"],
                 "metadata": {**chunk["metadata"], **metadata},
             })
         selected.append((document, released_chunks))
     if {doc["metadata"]["source_reference"] for doc, _ in selected} != SOURCES:
         raise ValueError("Demo release source allowlist is incomplete")
+    if not include_proposals:
+        return selected
     proposed = runpy.run_path(
         str(PROJECT_ROOT / "scripts" / "build-rule-evidence-staging.py")
     )["prepare"]()
@@ -98,7 +109,9 @@ def prepare_release() -> list[tuple[dict, list[dict]]]:
         ):
             raise ValueError("Proposal source is not a reviewed staging card")
         reference = source_meta["source_reference"]
-        document_id = "kb-demo-proposal-" + hashlib.sha256(reference.encode()).hexdigest()[:24]
+        document_id = "kb-demo-proposal-" + hashlib.sha256(
+            f"{RELEASE_ID}:{reference}".encode()
+        ).hexdigest()[:24]
         label = f"拟议风控方法/【模拟演示·未获政策签核】{source['title']}"
         metadata = {
             **source_meta,
@@ -315,7 +328,8 @@ def main() -> None:
     args = parser.parse_args()
     if sum(bool(value) for value in (args.apply_local, args.apply_postgres, args.apply_proposals_postgres, args.withdraw_postgres, args.withdraw_proposals_postgres)) > 1:
         raise ValueError("Select exactly one apply target")
-    prepared = prepare_release()
+    include_proposals = bool(args.apply_proposals_postgres or args.withdraw_proposals_postgres)
+    prepared = prepare_release(include_proposals=include_proposals)
     result = {
         "mode": "dry_run", "release_id": RELEASE_ID,
         "documents": len(prepared), "chunks": sum(len(rows) for _, rows in prepared),

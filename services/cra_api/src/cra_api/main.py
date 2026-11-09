@@ -25,8 +25,9 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadF
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
+from openpyxl import load_workbook
 
-from cra.casefile import Case, load_cases
+from cra.casefile import Case, load_cases, load_fx
 from cra.case_knowledge import (
     case_evidence_document_id,
     sync_all_case_evidence,
@@ -34,18 +35,26 @@ from cra.case_knowledge import (
 )
 from cra.agent.task_router import plan_case_question, review_date_for_question, task_frame
 from cra.config import ROOT, get_settings
+from cra.countries import COUNTRY_ZH
+from cra.demo_financials import DEMO_ASSUMPTIONS, build_demo_financials
 from cra.draft.workbench import generate_risk_opinion
 from cra.external.gleif_mcp import lookup_lei_via_mcp
-from cra.excel_mock import FIELD_ROW, write_risk_opinion
+from cra.excel_mock import (
+    FIELD_ROW,
+    fill_ai_results,
+    read_workbook,
+    save_macro_results,
+)
 from cra.extract.extractor import check_level, extract_from_pdf
-from cra.extract.schema import FIELD_LABELS
-from cra.handoff import case_sap, import_package, read_package, sample_path
+from cra.extract.schema import FIELD_LABELS, ExtractedValue
+from cra.handoff import case_fx, case_sap, import_package, read_package, sample_path
 from cra.ingest.chunker import Chunk, chunk_markdown, chunk_pages
 from cra.ingest.knowledge_parser import (
     SUPPORTED_EXTENSIONS as KNOWLEDGE_EXTENSIONS,
     parse_knowledge_source,
 )
 from cra.lookup.matcher import LookupResult
+from cra.mock_sap import run_macro
 from cra.qa.case_chat import answer_case_question
 from cra.resources import entity_matcher, knowledge_chunks
 from cra.retrieve.runtime import (
@@ -54,6 +63,7 @@ from cra.retrieve.runtime import (
     shared_retriever_cache,
 )
 from cra.trace import log_event
+from cra.validate import Flag
 
 from .access import ROLE_ACCESS, knowledge_catalog, request_actor, source_type
 from .store import create_workflow_store, now_iso
@@ -115,6 +125,14 @@ class AgentAction(BaseModel):
 
 class ResolveTask(BaseModel):
     resolution: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FinalReviewPayload(BaseModel):
+    final_limit_usd: float = Field(ge=0)
+    method: str = Field(min_length=1, max_length=120)
+    approval_level: str = Field(min_length=1, max_length=160)
+    deviation_reason: str = Field(default="", max_length=1000)
+    artifact_checksum: str = Field(min_length=64, max_length=64)
 
 
 class ChatTurn(BaseModel):
@@ -325,11 +343,10 @@ def knowledge_reader_payload(
         or metadata.get("is_published") is not True
     ):
         raise HTTPException(404, "当前演示知识集没有该文档")
-    if release_id and principal["role"] not in {"admin", "super_admin"}:
+    if release_id:
         if (
             metadata.get("demo_release_id") != release_id
             or metadata.get("is_published") is not True
-            or (document["library_id"] == "case_history" and not is_case_archive)
         ):
             raise HTTPException(404, "当前演示知识集没有该文档")
     payload = knowledge_admin_payload(document)
@@ -549,7 +566,15 @@ def queue_financial_signoff(
     source: Dict[str, Any],
 ) -> Dict[str, Any]:
     """把已完成的财务抽取交给人工签署；真实与演示来源使用同一道门。"""
+    values = _normalize_combined_intangibles(values, case)
     notes = store.notes(case.case_id)
+    _invalidate_signoffs(
+        notes,
+        {"financial", "risk", "score", "artifact", "final"},
+        "财务证据已更新",
+    )
+    for derived in ("score_result", "current_artifact", "final_review"):
+        notes.pop(derived, None)
     notes.update({"financial_values": values, "financial_source": source})
     store.set_notes(case.case_id, notes)
     store.open_task(
@@ -594,6 +619,249 @@ def _sha256_path(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _content_hash(payload: Any) -> str:
+    """Stable fingerprint used to bind a human sign-off to one exact subject."""
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _subject_payload(case: Case, notes: Dict[str, Any], subject_type: str) -> Dict[str, Any]:
+    if subject_type == "entity":
+        return {"case_id": case.case_id, "selected_entity": notes.get("selected_entity") or {}}
+    if subject_type == "financial":
+        source = notes.get("financial_source") or {}
+        return {
+            "case_id": case.case_id,
+            "period_end": case.new_period,
+            "currency": case.statement_currency,
+            "values": notes.get("financial_values") or [],
+            "source": {
+                key: source.get(key)
+                for key in (
+                    "type", "filename", "checksum", "source_period", "company",
+                    "statement_scope", "validation_flags",
+                )
+                if source.get(key) is not None
+            },
+        }
+    if subject_type == "risk":
+        return {
+            "case_id": case.case_id,
+            "draft": notes.get("risk_draft") or {},
+            "source_ids": [
+                item.get("id") or item.get("citation")
+                for item in notes.get("risk_sources") or []
+            ],
+        }
+    if subject_type == "score":
+        return {"case_id": case.case_id, "score": notes.get("score_result") or {}}
+    if subject_type == "artifact":
+        return {"case_id": case.case_id, "artifact": notes.get("current_artifact") or {}}
+    if subject_type == "final":
+        return {
+            "case_id": case.case_id,
+            "score": notes.get("score_result") or {},
+            "artifact": notes.get("current_artifact") or {},
+            "review": notes.get("final_review") or {},
+        }
+    raise ValueError(f"Unsupported sign-off subject: {subject_type}")
+
+
+def _invalidate_signoffs(
+    notes: Dict[str, Any], subject_types: set[str], reason: str
+) -> None:
+    signoffs = []
+    for record in notes.get("signoffs") or []:
+        item = dict(record)
+        if item.get("subject_type") in subject_types and item.get("status") == "active":
+            item.update(
+                {
+                    "status": "invalidated",
+                    "invalidated_at": now_iso(),
+                    "invalidated_reason": reason,
+                }
+            )
+        signoffs.append(item)
+    notes["signoffs"] = signoffs
+
+
+def _record_signoff(
+    case: Case,
+    notes: Dict[str, Any],
+    subject_type: str,
+    principal: Dict[str, str],
+    declaration: str,
+) -> Dict[str, Any]:
+    _invalidate_signoffs(notes, {subject_type}, "同一对象已有更新版本签署")
+    existing = [
+        item for item in notes.get("signoffs") or []
+        if item.get("subject_type") == subject_type
+    ]
+    payload = _subject_payload(case, notes, subject_type)
+    record = {
+        "signoff_id": uuid4().hex,
+        "subject_type": subject_type,
+        "subject_id": f"{case.case_id}:{subject_type}",
+        "subject_version": len(existing) + 1,
+        "content_hash": _content_hash(payload),
+        "actor": principal["user_id"],
+        "actor_name": principal["name"],
+        "role": principal["role"],
+        "declaration": declaration,
+        "status": "active",
+        "signed_at": now_iso(),
+    }
+    notes.setdefault("signoffs", []).append(record)
+    return record
+
+
+def _valid_signoff(
+    case: Case, notes: Dict[str, Any], subject_type: str
+) -> Optional[Dict[str, Any]]:
+    expected = _content_hash(_subject_payload(case, notes, subject_type))
+    for record in reversed(notes.get("signoffs") or []):
+        if record.get("subject_type") != subject_type:
+            continue
+        if record.get("status") == "active" and hmac.compare_digest(
+            str(record.get("content_hash") or ""), expected
+        ):
+            return record
+        return None
+    return None
+
+
+REVIEW_ROLES = {
+    "高级分析师", "区域信用经理", "senior_credit_analyst",
+    "credit_manager", "quality_manager",
+}
+
+
+def _case_access_allowed(
+    case: Case,
+    notes: Dict[str, Any],
+    principal: Dict[str, str],
+    purpose: str,
+) -> bool:
+    """Minimal case ACL: maintenance read, demo scope, owner/participant and review roles."""
+    role = principal["role"]
+    if role in {"admin", "super_admin"}:
+        return purpose == "read"
+    if case.mock:
+        return True
+    access = notes.get("case_access") or {}
+    owner = str(access.get("owner_user_id") or notes.get("owner_user_id") or "")
+    participants = {str(item) for item in access.get("participants") or []}
+    if principal["user_id"] == owner or principal["user_id"] in participants:
+        return True
+    return role in REVIEW_ROLES and purpose in {"read", "final_signoff"}
+
+
+def require_case_access(
+    case: Case,
+    principal: Dict[str, str],
+    purpose: str = "read",
+) -> Dict[str, Any]:
+    notes = store.notes(case.case_id)
+    if not _case_access_allowed(case, notes, principal, purpose):
+        raise HTTPException(403, "当前用户不在该案件的授权范围内")
+    return notes
+
+
+def _signed_financial_values(case: Case, notes: Dict[str, Any]) -> List[ExtractedValue]:
+    values = []
+    normalized = _normalize_combined_intangibles(
+        list(notes.get("financial_values") or []), case
+    )
+    for raw in normalized:
+        payload = dict(raw)
+        if payload.get("confidence") not in {"high", "medium", "low"}:
+            payload["confidence"] = "medium"
+        payload.setdefault("period_end", case.new_period)
+        payload.setdefault("unit_multiplier", 1)
+        payload.setdefault("currency", case.statement_currency)
+        values.append(ExtractedValue.model_validate(payload))
+    return values
+
+
+def _normalize_combined_intangibles(
+    values: List[Dict[str, Any]], case: Case
+) -> List[Dict[str, Any]]:
+    """Avoid double deduction when a statement reports goodwill and intangibles together."""
+    if any(str(item.get("field")) == "goodwill" for item in values):
+        return values
+    combined = next(
+        (
+            item for item in values
+            if str(item.get("field")) == "intangible_assets"
+            and "goodwill" in str(item.get("source_text") or "").lower()
+            and "intangible" in str(item.get("source_text") or "").lower()
+        ),
+        None,
+    )
+    if combined is None:
+        return values
+    return [
+        *values,
+        {
+            "field": "goodwill",
+            "period_end": combined.get("period_end") or case.new_period,
+            "value": 0,
+            "unit_multiplier": combined.get("unit_multiplier") or 1,
+            "currency": combined.get("currency") or case.statement_currency,
+            "page": combined.get("page"),
+            "source_text": combined.get("source_text") or "",
+            "confidence": "medium",
+            "note": "原报表合并披露商誉与无形资产，合并数已全部记入无形资产；本列置 0 以避免额度基础重复扣减。",
+        },
+    ]
+
+
+def _validation_flags(notes: Dict[str, Any]) -> List[Flag]:
+    result = []
+    for raw in (notes.get("financial_source") or {}).get("validation_flags") or []:
+        result.append(
+            Flag(
+                str(raw.get("level") or "warn"),
+                str(raw.get("field") or ""),
+                str(raw.get("message") or ""),
+            )
+        )
+    return result
+
+
+def _qualitative_choices(risk_draft: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    result: Dict[str, Optional[str]] = {}
+    for key, raw in (risk_draft.get("qualitative") or {}).items():
+        if isinstance(raw, dict):
+            result[key] = raw.get("choice") or raw.get("final") or raw.get("ai")
+        else:
+            result[key] = str(raw) if raw is not None else None
+    return result
+
+
+def _case_fx_rate(case: Case) -> Optional[float]:
+    if case.statement_currency.upper() == "USD":
+        return 1.0
+    rates = case_fx(case)
+    if not rates and case.mock:
+        rates = load_fx()
+    exact = rates.get((case.statement_currency, case.new_period))
+    if exact:
+        return float(exact)
+    candidates = [
+        (period, value)
+        for (currency, period), value in rates.items()
+        if currency == case.statement_currency
+    ]
+    return float(sorted(candidates, reverse=True)[0][1]) if candidates else None
 
 
 def _header_text(value: Any) -> str:
@@ -829,7 +1097,7 @@ def ensure_seed_states() -> None:
             "tool_completed",
             "CRA Excel 已导入",
             "已读取 BP、信用段、历史财务、汇率和付款表现。",
-            ["Financial Statements", "Header params", "TCURR"],
+            ["Financial Statements", "Header params", "汇率快照"],
         )
         store.add_event(
             "CASE-001",
@@ -1278,13 +1546,34 @@ def delete_knowledge_document(
 
 
 @app.get("/cases")
-def cases() -> List[Dict[str, Any]]:
-    return store.case_summaries()
+def cases(
+    x_cra_user: str = Header(default="", alias="X-CRA-User"),
+    x_cra_name: str = Header(default="", alias="X-CRA-Name"),
+    x_cra_role: str = Header(default="", alias="X-CRA-Role"),
+) -> List[Dict[str, Any]]:
+    principal = require_request_actor(x_cra_user, x_cra_name, x_cra_role)
+    visible = []
+    for summary in store.case_summaries():
+        payload = store.case(summary["case_id"])
+        if payload is None:
+            continue
+        case = Case(**payload)
+        if _case_access_allowed(case, store.notes(case.case_id), principal, "read"):
+            visible.append(summary)
+    return visible
 
 
 @app.get("/cases/{case_id}")
-def case_detail(case_id: str) -> Dict[str, Any]:
-    return case_dict(find_case(case_id))
+def case_detail(
+    case_id: str,
+    x_cra_user: str = Header(default="", alias="X-CRA-User"),
+    x_cra_name: str = Header(default="", alias="X-CRA-Name"),
+    x_cra_role: str = Header(default="", alias="X-CRA-Role"),
+) -> Dict[str, Any]:
+    principal = require_request_actor(x_cra_user, x_cra_name, x_cra_role)
+    case = find_case(case_id)
+    require_case_access(case, principal)
+    return case_dict(case)
 
 
 @app.post("/cases/{case_id}/evidence/reindex")
@@ -1295,8 +1584,9 @@ def reindex_case_evidence(
     x_cra_role: str = Header(default="", alias="X-CRA-Role"),
 ) -> Dict[str, Any]:
     """Repair a case projection after a writer outside the Python store commits."""
-    require_business_actor(x_cra_user, x_cra_name, x_cra_role)
-    find_case(case_id)
+    principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
+    case = find_case(case_id)
+    require_case_access(case, principal, "write")
     changed = sync_case_evidence(store, case_id)
     return {
         "case_id": case_id, "document_id": case_evidence_document_id(case_id),
@@ -1312,8 +1602,9 @@ def update_case_title(
     x_cra_name: str = Header(default="", alias="X-CRA-Name"),
     x_cra_role: str = Header(default="", alias="X-CRA-Role"),
 ) -> Dict[str, Any]:
-    case = find_case(case_id)
     principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
+    case = find_case(case_id)
+    require_case_access(case, principal, "write")
     title = body.title.strip()
     if len(title) < 2:
         raise HTTPException(422, "案件名称至少需要 2 个字符")
@@ -1340,7 +1631,11 @@ async def preview_case(
     x_cra_file_name: str = Header(default="", alias="X-CRA-File-Name"),
     x_cra_file_size: str = Header(default="", alias="X-CRA-File-Size"),
     x_cra_file_sha256: str = Header(default="", alias="X-CRA-File-Sha256"),
+    x_cra_user: str = Header(default="", alias="X-CRA-User"),
+    x_cra_name: str = Header(default="", alias="X-CRA-Name"),
+    x_cra_role: str = Header(default="", alias="X-CRA-Role"),
 ) -> Dict[str, Any]:
+    require_business_actor(x_cra_user, x_cra_name, x_cra_role)
     path, filename, _ = await materialize_managed_upload(
         file,
         managed_id=x_cra_file_id,
@@ -1393,6 +1688,8 @@ async def create_case(
     preview = package_payload(path)
     if not preview["valid"]:
         raise HTTPException(422, detail=preview["errors"])
+    if duplicate_mode not in {"review", "update", "cycle"}:
+        raise HTTPException(422, "重复案件处理方式无效")
     if preview["duplicate"] and duplicate_mode == "review":
         raise HTTPException(
             409,
@@ -1401,27 +1698,56 @@ async def create_case(
                 "existing": preview["duplicate"],
             },
         )
+    previous_notes: Dict[str, Any] = {}
+    if preview["duplicate"] and duplicate_mode == "update":
+        existing_case_id = str(preview["duplicate"]["case_id"])
+        existing_case = find_case(existing_case_id)
+        require_case_access(existing_case, principal, "write")
+        existing_workflow = store.workflow(existing_case_id)
+        if existing_workflow["status"] == "completed":
+            raise HTTPException(
+                409,
+                "已完成案件不能被新文件覆盖，请选择“开始新评审周期”。",
+            )
+        previous_notes = store.notes(existing_case_id)
     case, created, errors = import_package(path, force_new=duplicate_mode == "cycle")
     if errors or case is None:
         raise HTTPException(422, detail=errors)
     store.upsert_case(case.__dict__, overwrite=True)
-    store.ensure_case(
-        case.case_id,
-        status="running",
-        stage="resolve_entity",
-        task="搜索并排序企业主体候选",
-        completed_tasks=1,
-        total_tasks=6,
-    )
+    if created:
+        store.ensure_case(
+            case.case_id,
+            status="running",
+            stage="resolve_entity",
+            task="搜索并排序企业主体候选",
+            completed_tasks=1,
+            total_tasks=6,
+        )
+    else:
+        # Replacing a workbook invalidates entity binding and every downstream
+        # signoff/result. Keep snapshots and cancelled tasks as audit history,
+        # but never inherit the old workflow position.
+        store.reset_case_review(case.case_id)
+    owner_name = previous_notes.get("owner") or principal["name"]
+    owner_user_id = previous_notes.get("owner_user_id") or principal["user_id"]
+    owner_role = previous_notes.get("owner_role") or principal["role"]
+    case_access = previous_notes.get("case_access") or {
+        "tenant": "demo" if case.mock else "default",
+        "region": str(case.customer.get("country") or ""),
+        "owner_user_id": owner_user_id,
+        "participants": [],
+        "review_roles": sorted(REVIEW_ROLES),
+    }
     store.set_notes(
         case.case_id,
         {
-            # The authenticated principal, not editable form text, owns the case.
-            # `owner` remains an accepted legacy form field for API compatibility.
-            "owner": principal["name"],
-            "owner_user_id": principal["user_id"],
-            "owner_role": principal["role"],
-            "due_date": due_date,
+            # Updating an existing draft preserves ownership and access scope,
+            # while intentionally dropping all evidence, signoffs and outputs.
+            "owner": owner_name,
+            "owner_user_id": owner_user_id,
+            "owner_role": owner_role,
+            "case_access": case_access,
+            "due_date": due_date or previous_notes.get("due_date", ""),
             "source_file_id": x_cra_file_id,
         },
     )
@@ -1429,7 +1755,11 @@ async def create_case(
         case.case_id,
         "case_created" if created else "case_updated",
         "案件已创建" if created else "案件已更新",
-        "已保存 Excel 快照并启动企业主体核验。",
+        (
+            "已保存 Excel 快照并启动企业主体核验。"
+            if created
+            else "已替换 Excel，取消旧待办并重新启动企业主体核验。"
+        ),
         ["CRA Excel"],
     )
     return case_dict(case)
@@ -1451,6 +1781,7 @@ def run_agent(
 ) -> Dict[str, Any]:
     principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
     case = find_case(case_id)
+    require_case_access(case, principal, "write")
     materialize_case_source(
         case,
         source_id=x_cra_source_id,
@@ -1561,12 +1892,125 @@ def run_agent(
             f"草稿引用 {len(sources)} 条规则或公开资料，等待人工复核。",
             [item["citation"] for item in sources],
         )
+    elif stage == "external_score":
+        note = store.notes(case_id)
+        if not note.get("selected_entity") or not _valid_signoff(case, note, "entity"):
+            store.update_workflow(
+                case_id,
+                status="blocked",
+                blocker="企业主体尚未完成确认，不能使用外部评级或执行评分。",
+                current_task="等待确认企业主体",
+            )
+            return case_dict(case)
+        if not _valid_signoff(case, note, "financial") or not _valid_signoff(case, note, "risk"):
+            store.update_workflow(
+                case_id,
+                status="blocked",
+                blocker="财务或风险意见签署已失效，不能评分。",
+                current_task="等待重新签署上游内容",
+            )
+            return case_dict(case)
+        if not case.mock:
+            store.update_workflow(
+                case_id,
+                status="blocked",
+                blocker="当前仅配置模拟评分规则；真实案件需要获批的评分规则版本。",
+                current_task="等待配置正式评分规则",
+            )
+            return case_dict(case)
+        fx_rate = _case_fx_rate(case)
+        if not fx_rate:
+            store.update_workflow(
+                case_id,
+                status="blocked",
+                blocker="缺少报表币种到 USD 的有效汇率快照。",
+                current_task="等待补充汇率",
+            )
+            return case_dict(case)
+        extracted = _signed_financial_values(case, note)
+        financial = {
+            value.field: value.normalized
+            for value in extracted
+            if value.normalized is not None
+        }
+        risk_draft = note.get("risk_draft") or {}
+        source_book = case_source_path(case)
+        method = "A. % Tangible Net Worth"
+        if source_book.is_file():
+            method = str(read_workbook(source_book).get("method") or method)
+        result = run_macro(
+            financial,
+            _qualitative_choices(risk_draft),
+            str((note.get("selected_entity") or {}).get("rating") or ""),
+            method,
+            case.requested_cl_usd,
+            fx_rate,
+        )
+        score = {
+            "rule_version": "mock-score-v1",
+            "data_mode": "mock_demo",
+            "input_hash": _content_hash(
+                {
+                    "financial_signoff": _valid_signoff(case, note, "financial")["content_hash"],
+                    "risk_signoff": _valid_signoff(case, note, "risk")["content_hash"],
+                    "requested_limit_usd": case.requested_cl_usd,
+                    "fx_rate": fx_rate,
+                    "method": method,
+                }
+            ),
+            "financial_score": result.financial,
+            "qualitative_score": result.qualitative,
+            "overall_score": result.overall,
+            "risk_class": result.risk_class,
+            "method": method,
+            "requested_limit_usd": case.requested_cl_usd,
+            "suggested_limit_usd": round(result.suggested_cl, 2),
+            "approval_level": result.approval,
+            "fx_rate": fx_rate,
+            "calculation_trace": result.breakdown,
+            "notes": result.notes,
+            "calculated_at": now_iso(),
+        }
+        _invalidate_signoffs(note, {"score", "artifact", "final"}, "评分结果已重新计算")
+        note["score_result"] = score
+        note.pop("current_artifact", None)
+        note.pop("final_review", None)
+        store.set_notes(case_id, note)
+        store.update_workflow(
+            case_id,
+            status="running",
+            current_stage="write_workbook",
+            current_task="写入已签财务证据、评分和风险意见",
+            blocker="",
+        )
+        store.add_event(
+            case_id,
+            "tool_completed",
+            "模拟评分已完成",
+            f"规则 mock-score-v1 产出建议额度 {score['suggested_limit_usd']:,.0f} USD；仅用于演示。",
+            ["mock-score-v1", f"FX {fx_rate}"],
+        )
     elif stage == "write_workbook":
         source = case_source_path(case)
         if source.is_file():
-            target = EXPORTS / f"{case_id}_CRA_review.xlsx"
-            shutil.copy2(source, target)
             note = store.notes(case_id)
+            if not _valid_signoff(case, note, "financial") or not _valid_signoff(case, note, "risk"):
+                store.update_workflow(
+                    case_id,
+                    status="blocked",
+                    blocker="财务或风险签署已失效，不能生成交付文件。",
+                    current_task="等待重新签署",
+                )
+                return case_dict(case)
+            score = note.get("score_result") or {}
+            if not score:
+                store.update_workflow(
+                    case_id,
+                    status="blocked",
+                    blocker="缺少可复算的评分结果。",
+                    current_task="等待重新评分",
+                )
+                return case_dict(case)
             risk_draft = note.get("risk_draft") or {}
             company_description = str(risk_draft.get("company_description") or "").strip()
             risk_comments = str(risk_draft.get("risk_comments") or "").strip()
@@ -1577,23 +2021,109 @@ def run_agent(
                     blocker="风险意见尚未完成，不能生成对外交付文件。",
                     current_task="等待补充风险意见",
                 )
-                target.unlink(missing_ok=True)
                 return case_dict(case)
+            artifacts = list(note.get("artifacts") or [])
+            version = len(artifacts) + 1
+            target = EXPORTS / f"{case_id}_CRA_review_v{version}.xlsx"
+            shutil.copy2(source, target)
             selected_entity = note.get("selected_entity") or {}
-            write_risk_opinion(
-                target,
+            extracted = _signed_financial_values(case, note)
+            signed_fields = {value.field for value in extracted}
+            missing_fields = sorted(set(FIELD_ROW) - signed_fields)
+            if missing_fields:
+                target.unlink(missing_ok=True)
+                store.update_workflow(
+                    case_id,
+                    status="blocked",
+                    blocker=(
+                        "已签财务快照仍缺少字段："
+                        + "、".join(missing_fields)
+                        + "。请补充原始证据后重新签署。"
+                    ),
+                    current_task="等待补齐财务证据",
+                )
+                return case_dict(case)
+            workbook = load_workbook(target)
+            fill_ai_results(
+                workbook,
+                extracted,
+                _validation_flags(note),
+                case.new_period,
+                risk_draft.get("qualitative") or {},
                 company_description,
                 risk_comments,
-                risk_draft.get("qualitative") or {},
                 str(selected_entity.get("rating") or ""),
-                str(selected_entity.get("entity_id") or ""),
+                "CRA Agent signed evidence",
+                dnb_duns=str(selected_entity.get("entity_id") or ""),
+                data_mode="mock_demo" if case.mock else "non_mock",
             )
+            workbook.save(target)
+            save_macro_results(
+                target,
+                {
+                    "financial": score["financial_score"],
+                    "qualitative": score["qualitative_score"],
+                    "overall": score["overall_score"],
+                    "risk_class": score["risk_class"],
+                    "suggested_cl": score["suggested_limit_usd"],
+                    "approval": score["approval_level"],
+                },
+            )
+            reopened = read_workbook(target)
+            written = reopened.get("values", {}).get(case.new_period, {})
+            expected = {
+                value.field: value.normalized
+                for value in extracted
+                if value.normalized is not None
+            }
+            ai_fields = {
+                str(row[0])
+                for row in reopened.get("ai_rows", [])[1:]
+                if row and row[0] in FIELD_ROW
+            }
+            mismatches = [
+                field for field, value in expected.items()
+                if written.get(field) != value
+            ]
+            if mismatches or ai_fields != set(FIELD_ROW):
+                target.unlink(missing_ok=True)
+                store.update_workflow(
+                    case_id,
+                    status="blocked",
+                    blocker="Excel 重开核验失败，21 个财务字段或 AI Import 不一致。",
+                    current_task="等待修复导出映射",
+                )
+                return case_dict(case)
+            checksum = _sha256_path(target)
+            artifact = {
+                "artifact_id": uuid4().hex,
+                "version": version,
+                "type": "cra_excel",
+                "path": str(target),
+                "file_name": target.name,
+                "checksum": checksum,
+                "data_mode": "mock_demo" if case.mock else "non_mock",
+                "financial_signoff_hash": _valid_signoff(case, note, "financial")["content_hash"],
+                "risk_signoff_hash": _valid_signoff(case, note, "risk")["content_hash"],
+                "score_input_hash": score["input_hash"],
+                "created_at": now_iso(),
+                "status": "current",
+            }
+            for previous in artifacts:
+                if previous.get("status") == "current":
+                    previous["status"] = "superseded"
+            artifacts.append(artifact)
+            _invalidate_signoffs(note, {"artifact", "final"}, "交付文件已生成新版本")
             note.update(
                 {
+                    "artifacts": artifacts,
+                    "current_artifact": artifact,
                     "export_path": str(target),
                     "export_file_name": target.name,
-                    "generated_at": now_iso(),
-                    "export_sections": ["Company Description", "Risk Comments"],
+                    "generated_at": artifact["created_at"],
+                    "export_sections": [
+                        "21 financial fields", "Review Evidence", "Risk Opinion", "Score Results"
+                    ],
                     "risk_opinion_written": True,
                 }
             )
@@ -1602,7 +2132,7 @@ def run_agent(
                 case_id,
                 status="awaiting_human",
                 current_stage="final_signoff",
-                current_task="等待最终额度建议签署",
+                current_task="等待最终额度、偏离和审批复核",
                 completed_tasks=1,
                 total_tasks=1,
             )
@@ -1610,7 +2140,8 @@ def run_agent(
                 case_id,
                 "final_signoff",
                 "完成最终复核",
-                "Excel 版本已生成。请核对偏离原因并完成最终签署。",
+                "核对建议额度、最终额度、偏离原因、审批等级及 artifact checksum。",
+                {"score": score, "artifact": artifact},
             )
         else:
             store.update_workflow(
@@ -1630,9 +2161,14 @@ def use_demo_financial_report(
     x_cra_source_name: str = Header(default="", alias="X-CRA-Case-Source-Name"),
     x_cra_source_size: str = Header(default="", alias="X-CRA-Case-Source-Size"),
     x_cra_source_sha256: str = Header(default="", alias="X-CRA-Case-Source-Sha256"),
+    x_cra_user: str = Header(default="", alias="X-CRA-User"),
+    x_cra_name: str = Header(default="", alias="X-CRA-Name"),
+    x_cra_role: str = Header(default="", alias="X-CRA-Role"),
 ) -> Dict[str, Any]:
     """仅用于产品演示：从交接包最近一期 SAP 数据生成一份明确标记的模拟当期抽取。"""
+    principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
     case = find_case(case_id)
+    require_case_access(case, principal, "write")
     materialize_case_source(
         case,
         source_id=x_cra_source_id,
@@ -1648,14 +2184,22 @@ def use_demo_financial_report(
 
     history = case_sap(case)
     if not history:
-        raise HTTPException(422, "交接包中没有可用的往期 SAP 财务数据")
+        demo_package = sample_path(case_id)
+        if demo_package.is_file():
+            history = read_package(demo_package).sap
+    if not history:
+        raise HTTPException(422, "当前案件没有可用于演示的历史财务数据")
     source_period = sorted(history, reverse=True)[0]
     source_values = history[source_period]
+    try:
+        demo_financials = build_demo_financials(source_values)
+    except ValueError as exc:
+        raise HTTPException(
+            422, f"历史数据不足以生成可勾稽的模拟财报：{exc}"
+        ) from exc
     values: List[Dict[str, Any]] = []
     for field in FIELD_ROW:
-        prior_value = source_values.get(field)
-        # 统一按 4% 演示增长保留会计等式；这不是业务预测。
-        demo_value = None if prior_value is None else round(float(prior_value) * 1.04, 2)
+        demo_value = demo_financials.get(field)
         values.append(
             {
                 "field": field,
@@ -1664,18 +2208,24 @@ def use_demo_financial_report(
                 "unit_multiplier": 1,
                 "currency": case.statement_currency,
                 "page": None,
-                "source_text": f"[演示数据] {field}: {demo_value}",
+                "source_text": f"[模拟情景] {field}: {demo_value}",
                 "confidence": "demo",
-                "note": f"基于 {source_period} SAP 数值按 4% 演示增长生成，仅用于流程演示。",
+                "note": (
+                    f"基于 {source_period} 历史数据按已披露的模拟情景生成；"
+                    "非客户真实财报。"
+                ),
             }
         )
 
     store.add_event(
         case_id,
         "tool_completed",
-        "已载入演示财报数据",
-        f"基于 {source_period} 历史数据构造 {case.new_period} 流程演示样本，不得用于真实授信决策。",
-        [f"SAP {source_period}", "演示数据生成规则"],
+        "已载入可勾稽的模拟财报",
+        (
+            f"基于 {source_period} 历史数据构造 {case.new_period} 模拟经营情景，"
+            "已通过资产负债表勾稽；不得用于真实授信决策。"
+        ),
+        [f"历史财务 {source_period}", "模拟情景规则 v1", "资产=负债+权益"],
     )
     return queue_financial_signoff(
         case,
@@ -1684,6 +2234,9 @@ def use_demo_financial_report(
             "type": "demo",
             "label": "演示财报数据",
             "source_period": source_period,
+            "scenario": "synthetic_operating_improvement_v1",
+            "assumptions": list(DEMO_ASSUMPTIONS),
+            "balance_check": "passed",
             "warning": "该数据仅用于演示 Agent 流程，不是客户真实当期财报。",
         },
     )
@@ -1699,9 +2252,14 @@ async def upload_financial_report(
     x_cra_file_name: str = Header(default="", alias="X-CRA-File-Name"),
     x_cra_file_size: str = Header(default="", alias="X-CRA-File-Size"),
     x_cra_file_sha256: str = Header(default="", alias="X-CRA-File-Sha256"),
+    x_cra_user: str = Header(default="", alias="X-CRA-User"),
+    x_cra_name: str = Header(default="", alias="X-CRA-Name"),
+    x_cra_role: str = Header(default="", alias="X-CRA-Role"),
 ) -> Dict[str, Any]:
     """保存正式财报、抽取当前期间字段，并送入既有的人工签署节点。"""
+    principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
     case = find_case(case_id)
+    require_case_access(case, principal, "write")
     workflow = store.workflow(case_id)
     if workflow["current_stage"] not in {"financial_evidence", "financial_signoff"}:
         raise HTTPException(409, "当前节点不需要财务报告")
@@ -1806,9 +2364,21 @@ def regenerate_risk_opinion(
     """Re-run the narrative agent while preserving the previous draft as a version."""
     case = find_case(case_id)
     workflow = store.workflow(case_id)
-    if workflow["current_stage"] not in {"risk_signoff", "write_workbook", "final_signoff"}:
+    if workflow["current_stage"] not in {
+        "risk_signoff",
+        "external_score",
+        "write_workbook",
+        "final_signoff",
+    }:
         raise HTTPException(409, "当前节点尚不能起草风险意见")
     notes = store.notes(case_id)
+    _invalidate_signoffs(
+        notes,
+        {"risk", "score", "artifact", "final"},
+        "风险意见已重新生成",
+    )
+    for derived in ("score_result", "current_artifact", "final_review"):
+        notes.pop(derived, None)
     previous = notes.get("risk_draft") or {}
     versions = list(notes.get("risk_opinion_versions") or [])
     if previous.get("risk_comments"):
@@ -1824,6 +2394,7 @@ def regenerate_risk_opinion(
     from cra.llm import get_llm
 
     principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
+    require_case_access(case, principal, "write")
     package = generate_risk_opinion(
         case,
         notes,
@@ -1842,6 +2413,20 @@ def regenerate_risk_opinion(
         }
     ]
     store.set_notes(case_id, notes)
+    if workflow["current_stage"] not in {"retrieve_context", "risk_signoff"}:
+        store.open_task(
+            case_id,
+            "risk_signoff",
+            "签署风险意见",
+            "风险意见已更新，请重新复核并签署。",
+        )
+        store.update_workflow(
+            case_id,
+            status="awaiting_human",
+            current_stage="risk_signoff",
+            current_task="等待风险意见重新签署",
+            blocker="",
+        )
     store.add_event(
         case_id,
         "agent_progress",
@@ -1861,12 +2446,20 @@ def update_risk_opinion(
     x_cra_role: str = Header(default="", alias="X-CRA-Role"),
 ) -> Dict[str, Any]:
     """Save an analyst-edited opinion without signing the current human gate."""
-    case = find_case(case_id)
     principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
+    case = find_case(case_id)
+    require_case_access(case, principal, "write")
     workflow = store.workflow(case_id)
     if workflow["status"] == "completed":
         raise HTTPException(409, "案件已归档，请启动新的复审周期进行修改")
     notes = store.notes(case_id)
+    _invalidate_signoffs(
+        notes,
+        {"risk", "score", "artifact", "final"},
+        "风险意见已编辑",
+    )
+    for derived in ("score_result", "current_artifact", "final_review"):
+        notes.pop(derived, None)
     current = notes.get("risk_draft") or {}
     if not current:
         raise HTTPException(409, "Agent 尚未生成风险意见草稿")
@@ -1894,19 +2487,21 @@ def update_risk_opinion(
     )
     notes["risk_draft"] = updated
     notes["risk_opinion_versions"] = versions[-20:]
-    export_path = Path(str(notes.get("export_path") or ""))
-    if export_path.is_file():
-        write_risk_opinion(
-            export_path,
-            updated["company_description"],
-            updated["risk_comments"],
-            updated.get("qualitative") or {},
-            str((notes.get("selected_entity") or {}).get("rating") or ""),
-            str((notes.get("selected_entity") or {}).get("entity_id") or ""),
-        )
-        notes["generated_at"] = saved_at
-        notes["risk_opinion_written"] = True
     store.set_notes(case_id, notes)
+    if workflow["current_stage"] not in {"retrieve_context", "risk_signoff"}:
+        store.open_task(
+            case_id,
+            "risk_signoff",
+            "签署风险意见",
+            "风险意见已修改，请重新复核并签署。",
+        )
+        store.update_workflow(
+            case_id,
+            status="awaiting_human",
+            current_stage="risk_signoff",
+            current_task="等待风险意见重新签署",
+            blocker="",
+        )
     store.add_event(
         case_id,
         "human_edit",
@@ -1934,12 +2529,19 @@ def resolve_human_task(
     if task is None:
         raise HTTPException(404, "待办不存在")
     notes = store.notes(case_id)
+    require_case_access(
+        case,
+        principal,
+        "final_signoff" if task["task_type"] == "final_signoff" else "write",
+    )
     if (
         task["task_type"] == "final_signoff"
         and notes.get("owner_user_id")
         and notes["owner_user_id"] == principal["user_id"]
     ):
         raise HTTPException(409, "最终复核必须由案件负责人之外的高级信用分析师完成")
+    if task["task_type"] == "final_signoff" and principal["role"] not in REVIEW_ROLES:
+        raise HTTPException(403, "最终复核必须由高级信用分析师或信用经理完成")
     resolutions = notes.setdefault("human_resolutions", {})
     resolutions[task["task_type"]] = {
         **body.resolution,
@@ -1959,7 +2561,38 @@ def resolve_human_task(
             raise HTTPException(422, "请先选择一个有效的企业主体")
         notes["entity_candidates"] = candidates
         notes["selected_entity"] = selected
+        _invalidate_signoffs(
+            notes,
+            {"entity", "financial", "risk", "score", "artifact", "final"},
+            "企业主体选择已更新",
+        )
+        _record_signoff(
+            case,
+            notes,
+            "entity",
+            principal,
+            "确认当前企业主体候选与本案客户相符",
+        )
+    elif task["task_type"] == "financial_signoff":
+        values = notes.get("financial_values") or []
+        if not values:
+            raise HTTPException(409, "没有可签署的财务证据")
+        blocking = [
+            flag for flag in (notes.get("financial_source") or {}).get("validation_flags") or []
+            if flag.get("level") == "error"
+        ]
+        if blocking:
+            raise HTTPException(409, "财务证据仍有未关闭的 error，不能签署")
+        _record_signoff(
+            case,
+            notes,
+            "financial",
+            principal,
+            "确认财务字段、期间、单位和来源证据已核对",
+        )
     elif task["task_type"] == "risk_signoff":
+        if not _valid_signoff(case, notes, "financial"):
+            raise HTTPException(409, "财务签署已失效，请先重新核对财务证据")
         opinion = body.resolution.get("opinion")
         if isinstance(opinion, dict):
             company_description = str(opinion.get("company_description") or "").strip()
@@ -1974,6 +2607,51 @@ def resolve_human_task(
                 "updated_at": now_iso(),
                 "signed_at": now_iso(),
             }
+        if not (notes.get("risk_draft") or {}).get("risk_comments"):
+            raise HTTPException(409, "没有可签署的风险意见")
+        _record_signoff(
+            case,
+            notes,
+            "risk",
+            principal,
+            "确认风险意见与引用证据已复核",
+        )
+    elif task["task_type"] == "final_signoff":
+        if not _valid_signoff(case, notes, "financial") or not _valid_signoff(case, notes, "risk"):
+            raise HTTPException(409, "上游签署已失效，不能完成最终复核")
+        score = notes.get("score_result") or {}
+        artifact = notes.get("current_artifact") or {}
+        if not score or not artifact:
+            raise HTTPException(409, "评分结果或交付文件缺失")
+        try:
+            review = FinalReviewPayload.model_validate(body.resolution)
+        except Exception as exc:
+            raise HTTPException(
+                422,
+                "最终复核必须包含最终额度、额度方法、审批等级和文件校验码",
+            ) from exc
+        if not hmac.compare_digest(review.artifact_checksum, str(artifact.get("checksum") or "")):
+            raise HTTPException(409, "交付文件已变化，请重新下载并复核")
+        if review.method != score.get("method") or review.approval_level != score.get("approval_level"):
+            raise HTTPException(409, "额度方法或审批等级与确定性评分结果不一致")
+        suggested = float(score.get("suggested_limit_usd") or 0)
+        deviation = round(review.final_limit_usd - suggested, 2)
+        if abs(deviation) > 0.01 and not review.deviation_reason.strip():
+            raise HTTPException(422, "最终额度偏离建议额度时必须填写偏离原因")
+        notes["final_review"] = {
+            **review.model_dump(),
+            "suggested_limit_usd": suggested,
+            "deviation_amount_usd": deviation,
+            "deviation_pct": round(deviation / suggested, 6) if suggested else None,
+            "reviewed_at": now_iso(),
+        }
+        _record_signoff(
+            case,
+            notes,
+            "final",
+            principal,
+            "确认最终额度、偏离、审批层级与交付文件一致",
+        )
     store.resolve_task(case_id, task_id)
     store.set_notes(case_id, notes)
     mapping = {
@@ -1986,8 +2664,8 @@ def resolve_human_task(
             "检索当前规则、行业与历史案件",
         ),
         "risk_signoff": (
-            "write_workbook",
-            "生成 CRA Excel 新版本",
+            "external_score",
+            "执行确定性模拟评分与审批分级",
         ),
         "final_signoff": ("completed", "案件已完成"),
     }
@@ -2012,8 +2690,15 @@ def resolve_human_task(
 
 
 @app.get("/cases/{case_id}/financial-evidence.csv")
-def download_financial_evidence(case_id: str) -> Response:
+def download_financial_evidence(
+    case_id: str,
+    x_cra_user: str = Header(default="", alias="X-CRA-User"),
+    x_cra_name: str = Header(default="", alias="X-CRA-Name"),
+    x_cra_role: str = Header(default="", alias="X-CRA-Role"),
+) -> Response:
     case = find_case(case_id)
+    principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
+    require_case_access(case, principal, "read")
     values = store.notes(case_id).get("financial_values", [])
     if not values:
         raise HTTPException(404, "当前案件尚无可下载的财务抽取结果")
@@ -2047,9 +2732,16 @@ def download_financial_evidence(case_id: str) -> Response:
 
 
 @app.get("/cases/{case_id}/financial-report/source")
-def view_financial_report_source(case_id: str):
+def view_financial_report_source(
+    case_id: str,
+    x_cra_user: str = Header(default="", alias="X-CRA-User"),
+    x_cra_name: str = Header(default="", alias="X-CRA-Name"),
+    x_cra_role: str = Header(default="", alias="X-CRA-Role"),
+):
     """Open the exact uploaded PDF used by the evidence table in the browser."""
-    find_case(case_id)
+    case = find_case(case_id)
+    principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
+    require_case_access(case, principal, "read")
     source = store.notes(case_id).get("financial_source") or {}
     stored_filename = str(source.get("stored_filename") or "")
     if not stored_filename or Path(stored_filename).name != stored_filename:
@@ -2067,8 +2759,15 @@ def view_financial_report_source(case_id: str):
 
 
 @app.get("/cases/{case_id}/source")
-def download_case_source(case_id: str):
+def download_case_source(
+    case_id: str,
+    x_cra_user: str = Header(default="", alias="X-CRA-User"),
+    x_cra_name: str = Header(default="", alias="X-CRA-Name"),
+    x_cra_role: str = Header(default="", alias="X-CRA-Role"),
+):
     case = find_case(case_id)
+    principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
+    require_case_access(case, principal, "read")
     path = case_source_path(case)
     if not path.is_file():
         raise HTTPException(404, "当前案件没有可下载的原始 Excel 快照")
@@ -2090,6 +2789,8 @@ def case_chat(
     started_at = time.monotonic()
     trace_id = uuid4().hex
     case = find_case(case_id)
+    principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
+    require_case_access(case, principal, "read")
     workflow = store.workflow(case_id)
     status_names = {
         "ready": "待处理",
@@ -2104,15 +2805,15 @@ def case_chat(
         "financial_signoff": "财务证据签署",
         "retrieve_context": "规则与历史检索",
         "risk_signoff": "风险意见签署",
+        "external_score": "确定性评分与审批分级",
         "write_workbook": "生成 CRA Excel",
         "final_signoff": "最终复核",
     }
-    principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
     notes = store.notes(case_id)
     frame = task_frame(case_id, workflow, notes)
     plan = plan_case_question(body.question, frame)
     review_date = review_date_for_question(body.question)
-    demo_label = "【模拟演示；非真实授信依据】\n" if case.mock else ""
+    demo_label = "【演示案件；不用于真实授信】\n" if case.mock else ""
     plan_view = {
         "intent": plan.intent,
         "steps": list(plan.steps),
@@ -2146,6 +2847,137 @@ def case_chat(
         if plan.intent == "live_ar_request":
             blocked_response["missing_info"] = ["授权的当前 SAP/AR 数据"]
         return blocked_response
+    if plan.intent in {
+        "case_status_explanation",
+        "case_next_action",
+        "case_evidence_inventory",
+    }:
+        stage = workflow["current_stage"]
+        stage_label = stage_names.get(stage, stage)
+        status_label = status_names.get(workflow["status"], workflow["status"])
+        state_source = {
+            "id": "S1",
+            "citation": "本案 · 当前流程状态",
+            "text": (
+                f"案件 {case_id}；状态：{status_label}；当前阶段：{stage_label}；"
+                f"当前任务：{workflow.get('current_task') or '未登记'}；"
+                f"阻断原因：{workflow.get('blocker') or '无'}。"
+            ),
+        }
+        confirmation = {
+            "resolve_entity": "核对候选企业的名称、国家、地址和注册编号，由经办分析师确认主体。",
+            "financial_evidence": "上传当期正式财报，核对主体、期间、币种、单位和报表页。",
+            "financial_signoff": "逐项核对抽取值、单位、页码和原文后签署财务证据。",
+            "retrieve_context": "系统正在检索已授权规则与本案证据，当前无需人工操作。",
+            "risk_signoff": "核对风险立场、主要风险、建议条件和定性选项后签署。",
+            "external_score": "系统按已签事实执行确定性评分，当前无需人工计算。",
+            "write_workbook": "系统正在回写并核验 Excel，无需人工修改源文件。",
+            "final_signoff": "高级信用分析师需核对建议额度、最终额度、偏离原因、审批层级和文件校验和。",
+            "completed": "案件已经完成；如上游材料变化，应重新进入相应复核节点。",
+        }.get(stage, workflow.get("current_task") or "请查看当前任务。")
+        if plan.intent == "case_status_explanation":
+            if workflow["status"] == "blocked":
+                conclusion = (
+                    f"结论：案件在{stage_label}暂停，原因是"
+                    f"{workflow.get('blocker') or '关键材料尚未通过校验'}。[S1]"
+                )
+            elif workflow["status"] == "awaiting_human":
+                conclusion = (
+                    f"结论：案件没有卡死，当前处于{stage_label}，正在等待人工处理"
+                    f"“{workflow.get('current_task') or confirmation}”。[S1]"
+                )
+            elif workflow["status"] == "completed":
+                conclusion = "结论：本案已经完成最终复核并形成当前有效交付版本。[S1]"
+            else:
+                conclusion = (
+                    f"结论：案件正在{stage_label}，当前任务是"
+                    f"“{workflow.get('current_task') or '继续处理'}”。[S1]"
+                )
+            answer = (
+                f"{demo_label}{conclusion}\n"
+                f"与本案的关系：完成当前节点后，系统才会进入下一阶段。[S1]\n"
+                f"下一步：{confirmation}[S1]"
+            )
+            sources = [state_source]
+        elif plan.intent == "case_next_action":
+            answer = (
+                f"{demo_label}结论：当前需要处理的是{stage_label}。[S1]\n"
+                f"需要确认：{confirmation}[S1]\n"
+                "下一步：按页面当前任务完成核对；上游材料变化后，已有签署会自动失效并重新复核。[S1]"
+            )
+            sources = [state_source]
+        else:
+            sources = [
+                {
+                    "id": "S1",
+                    "citation": "本案 · CRA Excel 与客户信息",
+                    "text": (
+                        f"客户：{case.customer.get('name') or '未登记'}；"
+                        f"BP：{case.bp}；申请额度：{case.requested_cl_usd} USD。"
+                    ),
+                }
+            ]
+            categories = ["CRA Excel 与客户信息"]
+            selected_entity = notes.get("selected_entity") or {}
+            if selected_entity:
+                sources.append(
+                    {
+                        "id": f"S{len(sources) + 1}",
+                        "citation": "本案 · 已确认企业主体",
+                        "text": (
+                            f"主体名称：{selected_entity.get('name') or '未登记'}；"
+                            f"主体编号：{selected_entity.get('entity_id') or '未登记'}；"
+                            f"国家：{selected_entity.get('country') or '未登记'}。"
+                        ),
+                    }
+                )
+                categories.append("已确认企业主体")
+            financial_source = notes.get("financial_source") or {}
+            if financial_source:
+                sources.append(
+                    {
+                        "id": f"S{len(sources) + 1}",
+                        "citation": "本案 · 财务证据",
+                        "text": (
+                            f"来源：{financial_source.get('label') or financial_source.get('filename') or financial_source.get('type') or '未登记'}；"
+                            f"已登记字段：{len(notes.get('financial_values') or [])} 项。"
+                        ),
+                    }
+                )
+                categories.append("财务证据")
+            risk_sources = list(notes.get("risk_sources") or [])[:5]
+            for item in risk_sources:
+                sources.append(
+                    {
+                        "id": f"S{len(sources) + 1}",
+                        "citation": str(item.get("citation") or item.get("id") or "评审参考资料"),
+                        "text": str(item.get("text") or ""),
+                    }
+                )
+            if risk_sources:
+                categories.append(f"风险意见参考资料 {len(risk_sources)} 条")
+            answer = (
+                f"{demo_label}结论：本案当前使用了{'、'.join(categories)}。[S1]\n"
+                "与本案的关系：这些资料分别支持客户识别、财务核对和风险意见，不会自动代替人工签署。[S1]\n"
+                "下一步：展开“查看本次回答依据”，可逐项核对材料名称和内容。[S1]"
+            )
+        observe(
+            "structured_case_answer",
+            source_count=len(sources),
+            citation_ok=True,
+        )
+        return {
+            "found": True,
+            "answer": answer,
+            "sources": sources,
+            "citation": {},
+            "validation_attempts": 0,
+            "requires_human_review": False,
+            "review_task_id": None,
+            "external_status": "not_requested",
+            "plan": plan_view,
+            "trace_id": trace_id,
+        }
     lei = plan.external_lei
     external_materials: Dict[str, str] = {}
     external_status = "not_requested"
@@ -2179,7 +3011,12 @@ def case_chat(
             return {
                 "found": False,
                 "answer": demo_label + "GLEIF 未返回该 LEI 的记录；这不等于企业不存在，请核对号码或人工核验。",
-                "sources": [{"citation": record["source_url"], "text": f"查询时点：{record['observed_at']}"}],
+                "sources": [{
+                    "id": "S1",
+                    "citation": f"外部公开资料 · GLEIF LEI {lei}",
+                    "text": f"查询时点：{record['observed_at']}",
+                    "url": record["source_url"],
+                }],
                 "external_status": "not_found",
                 "plan": plan_view,
                 "trace_id": trace_id,
@@ -2193,6 +3030,74 @@ def case_chat(
             "此记录仅供主体核验，不自动证明与 SAP BP 匹配，不构成评级或授信意见。"
             "LAPSED 不等于企业已停止经营。"
         )
+        legal_name = str(record.get("legal_name") or "未返回")
+        case_name = str(case.customer.get("name") or "未登记")
+        country_code = str(record.get("legal_address_country") or "")
+        country = COUNTRY_ZH.get(country_code, country_code or "未返回")
+        if country_code and country != country_code:
+            country = f"{country}（{country_code}）"
+        status_code = str(record.get("registration_status") or "")
+        status = {
+            "ISSUED": "有效（ISSUED）",
+            "LAPSED": "已失效（LAPSED）",
+            "RETIRED": "已注销（RETIRED）",
+            "ANNULLED": "已撤销（ANNULLED）",
+        }.get(status_code, status_code or "未返回")
+        updated_at = str(record.get("last_update_date") or "未返回").split("T", 1)[0]
+        def normalize_name(value: str) -> str:
+            return re.sub(r"[^a-z0-9]", "", value.casefold())
+
+        name_matches = bool(
+            legal_name != "未返回"
+            and normalize_name(legal_name) == normalize_name(case_name)
+        )
+        if name_matches:
+            relationship = (
+                f"与本案的关系：外部法定名称与本案客户 {case_name} 一致；"
+                "但名称一致仍不足以证明与 SAP BP 完成绑定。[S1]"
+            )
+            next_step = (
+                "下一步：继续核对注册地址和注册编号，再由经办人确认主体绑定。[S1]"
+            )
+        else:
+            relationship = (
+                f"与本案的关系：本案客户是 {case_name}，与 {legal_name} 名称不一致；"
+                "不能将该 LEI 绑定到当前 SAP BP。[S1]"
+            )
+            next_step = (
+                "下一步：请提供本案客户的官方 LEI，或按注册地址和注册编号继续人工核验。[S1]"
+            )
+        source_text = external_materials[f"GLEIF LEI {lei}"]
+        observe(
+            "external_answered",
+            source_count=1,
+            external="found",
+            citation_ok=True,
+        )
+        return {
+            "found": True,
+            "answer": (
+                "【演示案件；以下为 GLEIF 实时公开数据】\n"
+                f"结论：该 LEI 对应 {legal_name}，注册国家为 {country}，"
+                f"登记状态为{status}，官方记录更新于 {updated_at}。[S1]\n"
+                f"{relationship}\n{next_step}"
+            ),
+            "sources": [
+                {
+                    "id": "S1",
+                    "citation": f"外部公开资料 · GLEIF LEI {lei}",
+                    "text": source_text,
+                    "url": record["source_url"],
+                }
+            ],
+            "citation": {},
+            "validation_attempts": 0,
+            "requires_human_review": False,
+            "review_task_id": None,
+            "external_status": external_status,
+            "plan": plan_view,
+            "trace_id": trace_id,
+        }
     evidence_workflow = {
         **workflow,
         "status": status_names.get(workflow["status"], workflow["status"]),
@@ -2299,9 +3204,18 @@ def case_chat(
 
 
 @app.get("/cases/{case_id}/export")
-def export_case(case_id: str):
-    find_case(case_id)
-    path = Path(store.notes(case_id).get("export_path", ""))
+def export_case(
+    case_id: str,
+    x_cra_user: str = Header(default="", alias="X-CRA-User"),
+    x_cra_name: str = Header(default="", alias="X-CRA-Name"),
+    x_cra_role: str = Header(default="", alias="X-CRA-Role"),
+):
+    case = find_case(case_id)
+    principal = require_business_actor(x_cra_user, x_cra_name, x_cra_role)
+    require_case_access(case, principal, "read")
+    notes = store.notes(case_id)
+    artifact = notes.get("current_artifact") or {}
+    path = Path(str(artifact.get("path") or ""))
     if not path.is_file():
         raise HTTPException(404, "当前案件尚未生成可下载的 Excel")
     return FileResponse(
