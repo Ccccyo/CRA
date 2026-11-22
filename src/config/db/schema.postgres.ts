@@ -1,5 +1,6 @@
 import {
   boolean,
+  customType,
   doublePrecision,
   index,
   integer,
@@ -22,6 +23,12 @@ const customSchema =
 const table: typeof pgTable = customSchema
   ? (customSchema.table.bind(customSchema) as unknown as typeof pgTable)
   : pgTable;
+
+const bytea = customType<{ data: Buffer }>({
+  dataType() {
+    return 'bytea';
+  },
+});
 
 export const user = table(
   'user',
@@ -718,6 +725,7 @@ export const craFileObject = table(
       .$type<Record<string, unknown>>()
       .notNull()
       .default({}),
+    content: bytea('content'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),

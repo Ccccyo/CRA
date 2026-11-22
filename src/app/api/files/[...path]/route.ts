@@ -1,4 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import {
+  createHash,
+  createHmac,
+  randomUUID,
+  timingSafeEqual,
+} from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { NextRequest } from 'next/server';
 import { sql } from 'drizzle-orm';
@@ -21,7 +26,7 @@ type FilePurpose = 'case_excel' | 'financial_report' | 'knowledge_source';
 type FileRow = {
   id: string;
   purpose: FilePurpose;
-  storage_provider: 'local' | 'r2';
+  storage_provider: 'local' | 'r2' | 'database';
   bucket: string;
   object_key: string;
   original_filename: string;
@@ -156,14 +161,27 @@ async function initUpload(request: NextRequest, user: { id: string }) {
     body.contentType || 'application/octet-stream'
   ).slice(0, 160);
   const sha256 = String(body.sha256 || '').toLowerCase();
+  const config = managedStorageConfig();
+  const maxBytes =
+    config.backend === 'database'
+      ? Math.min(policy.maxBytes, 4 * 1024 * 1024)
+      : policy.maxBytes;
   if (!filename || !policy.extensions.has(extension(filename))) {
     return Response.json({ detail: '文件扩展名不受支持' }, { status: 415 });
   }
   if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0) {
     return Response.json({ detail: '文件不能为空' }, { status: 422 });
   }
-  if (sizeBytes > policy.maxBytes) {
-    return Response.json({ detail: '文件超过允许的大小上限' }, { status: 413 });
+  if (sizeBytes > maxBytes) {
+    return Response.json(
+      {
+        detail:
+          config.backend === 'database'
+            ? '当前托管模式仅支持 4 MB 以内文件，请配置 R2 后上传更大文件'
+            : '文件超过允许的大小上限',
+      },
+      { status: 413 }
+    );
   }
   if (sha256 && !/^[a-f0-9]{64}$/.test(sha256)) {
     return Response.json({ detail: 'SHA-256 格式无效' }, { status: 422 });
@@ -186,14 +204,13 @@ async function initUpload(request: NextRequest, user: { id: string }) {
     id: string;
     object_key: string;
     original_filename: string;
-    storage_provider: 'local' | 'r2';
+    storage_provider: 'local' | 'r2' | 'database';
     status: string;
     expires_at: Date | string;
   }>(existingResult)[0];
   if (existing) {
-    const config = managedStorageConfig();
     const uploadUrl =
-      config.backend === 'r2'
+      existing.storage_provider === 'r2'
         ? await signedObjectUrl({
             objectKey: existing.object_key,
             method: 'PUT',
@@ -220,7 +237,6 @@ async function initUpload(request: NextRequest, user: { id: string }) {
     parentFileId = parent.id;
   }
 
-  const config = managedStorageConfig();
   const fileId = randomUUID();
   const sessionId = randomUUID();
   const objectKey = `cra/${body.purpose}/${new Date().toISOString().slice(0, 7).replace('-', '/')}/${fileId}`;
@@ -272,20 +288,19 @@ async function initUpload(request: NextRequest, user: { id: string }) {
   );
 }
 
-async function uploadLocalContent(
+async function uploadContent(
   request: NextRequest,
   user: { id: string },
   fileId: string
 ) {
-  const config = managedStorageConfig();
-  if (config.backend !== 'local') {
+  const file = await ownedFile(fileId, user.id);
+  if (!file) return Response.json({ detail: '文件不存在' }, { status: 404 });
+  if (file.storage_provider === 'r2') {
     return Response.json(
       { detail: '生产文件必须直传对象存储' },
       { status: 404 }
     );
   }
-  const file = await ownedFile(fileId, user.id);
-  if (!file) return Response.json({ detail: '文件不存在' }, { status: 404 });
   if (!['INITIATED', 'UPLOADING'].includes(file.status)) {
     return Response.json({ detail: '当前文件状态不能上传' }, { status: 409 });
   }
@@ -296,13 +311,29 @@ async function uploadLocalContent(
       { status: 422 }
     );
   }
-  const filePath = await ensureLocalManagedFileDirectory(file.object_key);
-  await writeFile(filePath, payload);
-  await db().execute(sql`
-    UPDATE cra_file_object
-    SET status = 'UPLOADING', updated_at = NOW()
-    WHERE id = ${file.id}
-  `);
+  const digest = createHash('sha256').update(payload).digest('hex');
+  if (file.sha256 && digest !== file.sha256) {
+    await audit(file.id, user.id, 'upload', 'rejected', request, {
+      reason: 'sha256_mismatch',
+    });
+    return Response.json({ detail: '文件完整性校验失败' }, { status: 422 });
+  }
+  if (file.storage_provider === 'database') {
+    await db().execute(sql`
+      UPDATE cra_file_object
+      SET content = ${Buffer.from(payload)}, etag = ${digest},
+          status = 'UPLOADING', updated_at = NOW()
+      WHERE id = ${file.id}
+    `);
+  } else {
+    const filePath = await ensureLocalManagedFileDirectory(file.object_key);
+    await writeFile(filePath, payload);
+    await db().execute(sql`
+      UPDATE cra_file_object
+      SET etag = ${digest}, status = 'UPLOADING', updated_at = NOW()
+      WHERE id = ${file.id}
+    `);
+  }
   return new Response(null, { status: 204 });
 }
 
@@ -330,7 +361,24 @@ async function completeUpload(
   }
   let objectInfo: { sizeBytes: number; etag: string };
   try {
-    objectInfo = await headManagedObject(file.object_key);
+    if (file.storage_provider === 'database') {
+      const contentResult = await db().execute(sql`
+        SELECT octet_length(content) AS size_bytes, etag
+        FROM cra_file_object
+        WHERE id = ${file.id} AND content IS NOT NULL
+        LIMIT 1
+      `);
+      const stored = rows<{ size_bytes: number | string; etag: string }>(
+        contentResult
+      )[0];
+      if (!stored) throw new Error('database_content_missing');
+      objectInfo = {
+        sizeBytes: Number(stored.size_bytes),
+        etag: stored.etag || '',
+      };
+    } else {
+      objectInfo = await headManagedObject(file.object_key);
+    }
   } catch (error) {
     await audit(file.id, user.id, 'complete', 'failed', request, {
       reason: error instanceof Error ? error.message : 'head_failed',
@@ -379,6 +427,59 @@ async function fileStatus(user: { id: string }, fileId: string) {
   });
 }
 
+async function serviceContent(request: NextRequest, fileId: string) {
+  const secret = process.env.CRA_API_SHARED_SECRET || '';
+  const expires = Number(request.nextUrl.searchParams.get('expires') || 0);
+  const disposition =
+    request.nextUrl.searchParams.get('disposition') === 'inline'
+      ? 'inline'
+      : 'attachment';
+  const signature = request.nextUrl.searchParams.get('signature') || '';
+  const expected = createHmac('sha256', secret)
+    .update(`${fileId}.${expires}.${disposition}`)
+    .digest('hex');
+  const suppliedBytes = Buffer.from(signature, 'hex');
+  const expectedBytes = Buffer.from(expected, 'hex');
+  const valid =
+    Boolean(secret) &&
+    Number.isSafeInteger(expires) &&
+    expires >= Math.floor(Date.now() / 1000) &&
+    suppliedBytes.length === expectedBytes.length &&
+    timingSafeEqual(suppliedBytes, expectedBytes);
+  if (!valid) {
+    return Response.json({ detail: '文件访问签名无效或已过期' }, { status: 403 });
+  }
+  const result = await db().execute(sql`
+    SELECT original_filename, mime_declared, content, status
+    FROM cra_file_object
+    WHERE id = ${fileId} AND storage_provider = 'database'
+      AND deleted_at IS NULL
+    LIMIT 1
+  `);
+  const file = rows<{
+    original_filename: string;
+    mime_declared: string;
+    content: Buffer | Uint8Array | null;
+    status: string;
+  }>(result)[0];
+  if (
+    !file ||
+    !file.content ||
+    !['RECEIVED', 'PROCESSING', 'READY', 'REJECTED'].includes(file.status)
+  ) {
+    return Response.json({ detail: '文件内容不存在' }, { status: 404 });
+  }
+  const safeName = file.original_filename.replace(/[\r\n"\\]/g, '_');
+  return new Response(Uint8Array.from(file.content).buffer, {
+    headers: {
+      'Content-Type': file.mime_declared || 'application/octet-stream',
+      'Content-Length': String(file.content.byteLength),
+      'Content-Disposition': `${disposition}; filename*=UTF-8''${encodeURIComponent(safeName)}`,
+      'Cache-Control': 'private, no-store',
+    },
+  });
+}
+
 async function downloadUrl(
   request: NextRequest,
   user: { id: string },
@@ -424,7 +525,9 @@ async function deleteFile(
     );
   }
   try {
-    await deleteManagedObject(file.object_key);
+    if (file.storage_provider !== 'database') {
+      await deleteManagedObject(file.object_key);
+    }
   } catch (error) {
     await audit(file.id, user.id, 'delete', 'failed', request, {
       reason: error instanceof Error ? error.message : 'delete_failed',
@@ -436,7 +539,8 @@ async function deleteFile(
   }
   await db().execute(sql`
     UPDATE cra_file_object
-    SET status = 'DELETED', deleted_at = NOW(), updated_at = NOW()
+    SET status = 'DELETED', content = NULL,
+        deleted_at = NOW(), updated_at = NOW()
     WHERE id = ${file.id}
   `);
   await audit(file.id, user.id, 'delete', 'success', request);
@@ -444,9 +548,21 @@ async function deleteFile(
 }
 
 async function route(request: NextRequest, context: RouteContext) {
+  const { path } = await context.params;
+  if (
+    request.method === 'GET' &&
+    path.length === 2 &&
+    path[1] === 'service-content'
+  ) {
+    try {
+      return await serviceContent(request, path[0]);
+    } catch (error) {
+      console.error('managed service content failed', error);
+      return Response.json({ detail: '文件内容读取失败' }, { status: 503 });
+    }
+  }
   const auth = await requireUser();
   if (auth.error || !auth.user) return auth.error;
-  const { path } = await context.params;
   try {
     if (request.method === 'POST' && path.length === 1 && path[0] === 'init') {
       return await initUpload(request, auth.user);
@@ -454,7 +570,7 @@ async function route(request: NextRequest, context: RouteContext) {
     if (path.length === 2) {
       const [fileId, action] = path;
       if (request.method === 'PUT' && action === 'content') {
-        return await uploadLocalContent(request, auth.user, fileId);
+        return await uploadContent(request, auth.user, fileId);
       }
       if (request.method === 'POST' && action === 'complete') {
         return await completeUpload(request, auth.user, fileId);

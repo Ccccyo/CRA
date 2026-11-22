@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 
 import { db } from '@/core/db';
@@ -5,14 +6,13 @@ import { db } from '@/core/db';
 import {
   deleteManagedObject,
   localManagedFilePath,
-  managedStorageConfig,
   signedObjectUrl,
 } from './managed-file-storage';
 
 export type ManagedFileRecord = {
   id: string;
   purpose: string;
-  storage_provider: 'local' | 'r2';
+  storage_provider: 'local' | 'r2' | 'database';
   bucket: string;
   object_key: string;
   original_filename: string;
@@ -78,7 +78,35 @@ export async function currentBoundFile(
   return rows<ManagedFileRecord>(result)[0] || null;
 }
 
-export async function managedFileReadLocation(file: ManagedFileRecord) {
+function databaseManagedFileUrl(
+  file: ManagedFileRecord,
+  origin: string,
+  disposition: 'attachment' | 'inline' = 'attachment'
+) {
+  const secret = process.env.CRA_API_SHARED_SECRET || '';
+  if (!secret || !origin) {
+    throw new Error('数据库托管文件缺少服务签名配置');
+  }
+  const expires = Math.floor(Date.now() / 1000) + 300;
+  const payload = `${file.id}.${expires}.${disposition}`;
+  const signature = createHmac('sha256', secret).update(payload).digest('hex');
+  const url = new URL(
+    `/api/files/${encodeURIComponent(file.id)}/service-content`,
+    origin
+  );
+  url.searchParams.set('expires', String(expires));
+  url.searchParams.set('disposition', disposition);
+  url.searchParams.set('signature', signature);
+  return url.toString();
+}
+
+export async function managedFileReadLocation(
+  file: ManagedFileRecord,
+  origin = ''
+) {
+  if (file.storage_provider === 'database') {
+    return { url: databaseManagedFileUrl(file, origin), localPath: '' };
+  }
   if (file.storage_provider === 'local') {
     return {
       url: '',
@@ -93,15 +121,32 @@ export async function managedFileReadLocation(file: ManagedFileRecord) {
 
 export async function managedFileBrowserUrl(
   file: ManagedFileRecord,
-  disposition: 'attachment' | 'inline' = 'attachment'
+  disposition: 'attachment' | 'inline' = 'attachment',
+  origin = ''
 ) {
-  if (managedStorageConfig().backend !== 'r2') return '';
+  if (file.storage_provider === 'database') {
+    return databaseManagedFileUrl(file, origin, disposition);
+  }
+  if (file.storage_provider !== 'r2') return '';
   return signedObjectUrl({
     objectKey: file.object_key,
     method: 'GET',
     downloadFilename: file.original_filename,
     disposition,
   });
+}
+
+export async function managedFileContent(file: ManagedFileRecord) {
+  if (file.storage_provider !== 'database') return null;
+  const result = await db().execute(sql`
+    SELECT content
+    FROM cra_file_object
+    WHERE id = ${file.id} AND deleted_at IS NULL
+    LIMIT 1
+  `);
+  const content = rows<{ content: Buffer | Uint8Array | null }>(result)[0]
+    ?.content;
+  return content ? Buffer.from(content) : null;
 }
 
 export async function markManagedFileProcessing(fileId: string) {
@@ -231,11 +276,14 @@ export async function deleteRetiredManagedFile(
     LIMIT 1
   `);
   if (rows(currentResult).length) return;
-  await deleteManagedObject(file.object_key);
+  if (file.storage_provider !== 'database') {
+    await deleteManagedObject(file.object_key);
+  }
   await db().transaction(async (tx: ReturnType<typeof db>) => {
     await tx.execute(sql`
       UPDATE cra_file_object
-      SET status = 'DELETED', deleted_at = NOW(), updated_at = NOW()
+      SET status = 'DELETED', content = NULL,
+          deleted_at = NOW(), updated_at = NOW()
       WHERE id = ${fileId}
     `);
     await tx.execute(sql`

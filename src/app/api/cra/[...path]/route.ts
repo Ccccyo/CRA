@@ -250,19 +250,21 @@ async function readFinancialReport(caseId: string) {
 
 async function managedSourceRedirect(
   file: ManagedFileRecord | null,
-  disposition: 'attachment' | 'inline' = 'attachment'
+  disposition: 'attachment' | 'inline' = 'attachment',
+  origin = ''
 ) {
-  if (!file || file.storage_provider !== 'r2') return null;
-  const url = await managedFileBrowserUrl(file, disposition);
+  if (!file || file.storage_provider === 'local') return null;
+  const url = await managedFileBrowserUrl(file, disposition, origin);
   return url ? Response.redirect(url, 307) : null;
 }
 
 async function addManagedFileHeaders(
   headers: Headers,
   file: ManagedFileRecord,
-  prefix = 'X-CRA-File'
+  prefix = 'X-CRA-File',
+  origin = ''
 ) {
-  const location = await managedFileReadLocation(file);
+  const location = await managedFileReadLocation(file, origin);
   headers.set(`${prefix}-Id`, file.id);
   headers.set(`${prefix}-Name`, encodeURIComponent(file.original_filename));
   headers.set(`${prefix}-Size`, String(file.size_bytes));
@@ -477,7 +479,11 @@ async function forward(request: NextRequest, context: RouteContext) {
         path[1],
         'financial_report'
       );
-      const redirect = await managedSourceRedirect(managed, 'inline');
+      const redirect = await managedSourceRedirect(
+        managed,
+        'inline',
+        request.nextUrl.origin
+      );
       if (redirect) return redirect;
       return (
         (await readFinancialReport(path[1])) ||
@@ -518,7 +524,9 @@ async function forward(request: NextRequest, context: RouteContext) {
       );
     }
     const redirect = await managedSourceRedirect(
-      await currentBoundFile('case', path[1], 'case_excel')
+      await currentBoundFile('case', path[1], 'case_excel'),
+      'attachment',
+      request.nextUrl.origin
     );
     if (redirect) return redirect;
   }
@@ -532,7 +540,8 @@ async function forward(request: NextRequest, context: RouteContext) {
   ) {
     const redirect = await managedSourceRedirect(
       await currentBoundFile('knowledge_document', path[2], 'knowledge_source'),
-      'inline'
+      'inline',
+      request.nextUrl.origin
     );
     if (redirect) return redirect;
   }
@@ -590,7 +599,12 @@ async function forward(request: NextRequest, context: RouteContext) {
         { status: 409 }
       );
     }
-    await addManagedFileHeaders(headers, managedUpload);
+    await addManagedFileHeaders(
+      headers,
+      managedUpload,
+      'X-CRA-File',
+      request.nextUrl.origin
+    );
     if (jsonBody.duplicate_mode) {
       headers.set('X-CRA-Duplicate-Mode', String(jsonBody.duplicate_mode));
     }
@@ -609,7 +623,12 @@ async function forward(request: NextRequest, context: RouteContext) {
   if (path[0] === 'cases' && path[1] && path[1] !== 'preview') {
     const caseSource = await currentBoundFile('case', path[1], 'case_excel');
     if (caseSource)
-      await addManagedFileHeaders(headers, caseSource, 'X-CRA-Case-Source');
+      await addManagedFileHeaders(
+        headers,
+        caseSource,
+        'X-CRA-Case-Source',
+        request.nextUrl.origin
+      );
   }
   if (
     path[0] === 'knowledge' &&
@@ -626,7 +645,8 @@ async function forward(request: NextRequest, context: RouteContext) {
       await addManagedFileHeaders(
         headers,
         knowledgeSource,
-        'X-CRA-Knowledge-Source'
+        'X-CRA-Knowledge-Source',
+        request.nextUrl.origin
       );
     }
   }

@@ -310,7 +310,7 @@ PostgreSQL 和 R2 无法共享数据库事务，因此必须通过状态机、ou
 ### 10.2 新增配置
 
 ```dotenv
-FILE_STORAGE_BACKEND="local" # production: r2
+FILE_STORAGE_BACKEND="local" # local | database | r2；正式生产使用 r2
 FILE_STORAGE_BUCKET=""
 FILE_STORAGE_REGION="auto"
 FILE_STORAGE_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
@@ -325,6 +325,8 @@ FILE_PROCESSING_MAX_ATTEMPTS="5"
 ```
 
 密钥不写入 `.env.example` 的真实值，不使用 `NEXT_PUBLIC_` 前缀，也不能注入浏览器 bundle。
+
+Vercel 未配置 R2 时，系统自动切换为 `database`，用于小规模演示和故障兜底。该模式将原件以 `bytea` 存入 PostgreSQL，强制限制单文件不超过 4 MB，并通过五分钟服务签名 URL 向 FastAPI 提供原件；正式业务仍应使用 R2，避免数据库容量和 Serverless 请求体限制成为瓶颈。
 
 R2 bucket 还需要为生产域名配置 CORS。将域名替换为实际 Vercel 域名和自定义域名，只允许 `PUT`、`GET`、`HEAD`，不要使用 `*`：
 

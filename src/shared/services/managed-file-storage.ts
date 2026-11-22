@@ -2,7 +2,7 @@ import { mkdir, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { AwsClient } from 'aws4fetch';
 
-export type ManagedStorageBackend = 'local' | 'r2';
+export type ManagedStorageBackend = 'local' | 'r2' | 'database';
 
 export type ManagedStorageConfig = {
   backend: ManagedStorageBackend;
@@ -37,11 +37,16 @@ export function managedStorageConfig(): ManagedStorageConfig {
     (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : '');
   const configuredBackend =
     process.env.FILE_STORAGE_BACKEND?.trim().toLowerCase();
+  const serverlessRuntime = Boolean(
+    process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+  );
   const backend: ManagedStorageBackend =
     configuredBackend === 'r2' ||
     (!configuredBackend && accessKeyId && secretAccessKey && bucket && endpoint)
       ? 'r2'
-      : 'local';
+      : configuredBackend === 'database' || serverlessRuntime
+        ? 'database'
+        : 'local';
 
   if (
     backend === 'r2' &&
@@ -147,6 +152,9 @@ export async function headManagedObject(objectKey: string) {
 
 export async function deleteManagedObject(objectKey: string) {
   const config = managedStorageConfig();
+  if (config.backend === 'database') {
+    throw new Error('数据库托管文件应通过文件记录删除');
+  }
   if (config.backend === 'local') {
     await unlink(localManagedFilePath(objectKey)).catch(
       (error: NodeJS.ErrnoException) => {

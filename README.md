@@ -22,7 +22,7 @@
 
    数据库、账号、角色和 RAG 配置详见 `docs/08-database-auth-and-rag.md`。
 
-   生产部署还需将 `FILE_STORAGE_BACKEND` 设为 `r2`，配置私有 R2 bucket 与 S3 API 凭证。浏览器只获得单对象短期上传地址，文件原件不经过 Vercel；完整配置与迁移步骤见 `docs/15-enterprise-upload-storage-design.md`。
+   正式生产部署应将 `FILE_STORAGE_BACKEND` 设为 `r2`，配置私有 R2 bucket 与 S3 API 凭证。未配置 R2 的 Vercel 演示环境会自动使用受限的 PostgreSQL 文件托管（单文件不超过 4 MB），避免写入 Serverless 只读目录；该回退不替代正式对象存储。完整配置与迁移步骤见 `docs/15-enterprise-upload-storage-design.md`。
 
 3. 首次运行：
 
