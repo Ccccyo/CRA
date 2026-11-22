@@ -59,11 +59,31 @@ class _ConnectionPool:
             with self._lock:
                 self._total = max(0, self._total - 1)
 
+    @staticmethod
+    def _healthy(connection: Any) -> bool:
+        """Validate an idle socket before handing it back to a request.
+
+        Neon and other PostgreSQL proxies may close an idle TLS connection
+        without psycopg marking the client object as closed.  A cheap query is
+        therefore required before reuse; otherwise the next business write
+        fails even though pool acquisition appeared successful.
+        """
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+            connection.rollback()
+            return True
+        except (psycopg.Error, OSError):
+            return False
+
     def acquire(self):
         while True:
             try:
                 connection = self._idle.get_nowait()
                 if connection.closed:
+                    self._discard(connection)
+                    continue
+                if not self._healthy(connection):
                     self._discard(connection)
                     continue
                 return connection
@@ -81,6 +101,9 @@ class _ConnectionPool:
                         raise
                 connection = self._idle.get(timeout=5)
                 if connection.closed:
+                    self._discard(connection)
+                    continue
+                if not self._healthy(connection):
                     self._discard(connection)
                     continue
                 return connection
