@@ -36,6 +36,7 @@ class Settings:
     ocr_backend: str  # auto / glm / paddle / paddle_api / none
     paddle_ocr_api_url: str
     paddle_ocr_api_token: str
+    runtime_dir: Path
     data_dir: Path
     eval_dir: Path
     reports_dir: Path
@@ -51,6 +52,9 @@ def get_settings() -> Settings:
     _load_dotenv(project_root / ".env.local")
     _load_dotenv(project_root / ".env")
     _load_dotenv(ROOT / ".env")
+    runtime_override = os.environ.get("CRA_RUNTIME_DIR")
+    serverless = bool(os.environ.get("VERCEL"))
+    runtime_dir = Path(runtime_override or ("/tmp/cra-runtime" if serverless else ROOT / "runtime"))
     return Settings(
         cra_api_shared_secret=os.environ.get("CRA_API_SHARED_SECRET", ""),
         database_url=os.environ.get("DATABASE_URL", ""),
@@ -69,9 +73,10 @@ def get_settings() -> Settings:
         ocr_backend=os.environ.get("OCR_BACKEND", "auto").lower(),
         paddle_ocr_api_url=os.environ.get("PADDLE_OCR_API_URL", "").strip(),
         paddle_ocr_api_token=os.environ.get("PADDLE_OCR_API_TOKEN", "").strip(),
+        runtime_dir=runtime_dir,
         data_dir=ROOT / "data",
         eval_dir=ROOT / "eval",
         reports_dir=ROOT / "reports",
-        logs_dir=ROOT / "logs",
+        logs_dir=runtime_dir / "logs" if runtime_override or serverless else ROOT / "logs",
         index_dir=ROOT / "index",
     )

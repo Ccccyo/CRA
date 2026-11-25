@@ -100,10 +100,7 @@ async def require_service_secret(request: Request, call_next):
 # Keep local development on the repository runtime directory while making
 # serverless instances safe to cold-start. Durable records remain in
 # PostgreSQL and original uploads remain in the managed object store.
-RUNTIME = Path(
-    os.environ.get("CRA_RUNTIME_DIR")
-    or ("/tmp/cra-runtime" if os.environ.get("VERCEL") else ROOT / "runtime")
-)
+RUNTIME = get_settings().runtime_dir
 UPLOADS = RUNTIME / "uploads"
 FINANCIAL_REPORTS = UPLOADS / "financial-reports"
 KNOWLEDGE_SOURCES = RUNTIME / "knowledge-sources"
@@ -2294,6 +2291,11 @@ async def upload_financial_report(
         raise HTTPException(422, f"财报解析失败：{exc}") from exc
     except Exception as exc:
         report_path.unlink(missing_ok=True)
+        logging.getLogger(__name__).warning(
+            "Financial extraction failed (%s, upstream_status=%s)",
+            type(exc).__name__,
+            getattr(exc, "status_code", None),
+        )
         raise HTTPException(502, "财报抽取服务暂时不可用，请稍后重试") from exc
 
     confidence_map = {"高": "high", "中": "medium", "低": "low", "推算": "medium", "—": "low"}

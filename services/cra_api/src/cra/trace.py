@@ -1,11 +1,15 @@
 """Write bounded, metadata-only local events; never retain model source text."""
 import hashlib
 import json
+import logging
 import time
 from datetime import datetime
 from typing import Any, Dict
 
 from cra.config import get_settings
+
+
+logger = logging.getLogger(__name__)
 
 
 SENSITIVE_KEYS = {
@@ -32,11 +36,14 @@ def _safe_value(key: str, value: Any) -> Any:
 
 def log_event(kind: str, payload: Dict[str, Any]) -> None:
     logs_dir = get_settings().logs_dir
-    logs_dir.mkdir(parents=True, exist_ok=True)
     record = {
         "ts": time.time(), "kind": kind,
         **{key: _safe_value(key, value) for key, value in payload.items()},
     }
     path = logs_dir / f"trace-{datetime.now():%Y%m%d}.jsonl"
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    try:
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except OSError as exc:
+        logger.warning("Trace write failed for %s (%s)", kind, type(exc).__name__)
